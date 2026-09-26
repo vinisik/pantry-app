@@ -76,5 +76,14 @@ export const pantryService = {
     }
 
     return updatedCount;
-  }
+  },
+
+  async deleteItem(itemId: string) {
+    const { error } = await supabase
+      .from('pantry_items')
+      .delete()
+      .eq('id', itemId);
+
+    if (error) throw new Error(`Erro ao remover da despensa: ${error.message}`);
+  },
 };

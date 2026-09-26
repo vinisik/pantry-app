@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shoppingService } from '../services/shoppingService';
+import { pantryService } from '../services/pantryService'; 
 
 interface ListScreenProps {
   session: any;
@@ -29,71 +30,108 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     queryFn: () => shoppingService.getSuggestions(houseId),
   });
 
-  const purchaseMutation = useMutation({
-    mutationFn: shoppingService.confirmPurchase,
+  // Mutação para adicionar item
+  const addMutation = useMutation({
+    mutationFn: (params: { name: string, qty: number, unit: string, duration?: number }) => 
+      shoppingService.addItem(houseId, userId, params.name, params.qty, params.unit, params.duration),
     onSuccess: () => {
+      setNewItemName(''); setNewItemQty('1'); setNewItemUnit('un'); setNewItemDuration('');
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
-      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
       queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
-  const addMutation = useMutation({
-    mutationFn: (params: { name: string, qty: number, unit: string, duration?: number }) => 
-      shoppingService.addItem(houseId, userId, params.name, params.qty, params.unit, params.duration),
-    onSuccess: () => {
-      setNewItemName('');
-      setNewItemQty('1');
-      setNewItemUnit('un');
-      setNewItemDuration('');
+  // Compra com Offline-First
+  const purchaseMutation = useMutation({
+    mutationFn: shoppingService.confirmPurchase,
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: ['shoppingList', houseId] });
+      const previousList = queryClient.getQueryData(['shoppingList', houseId]);
+      queryClient.setQueryData(['shoppingList', houseId], (old: any) => {
+        if (!old) return old;
+        return old.map((item: any) => {
+          if (item.id === variables.itemId) {
+            return { ...item, quantity_bought: item.quantity_bought + variables.quantityBoughtNow };
+          }
+          return item;
+        }).filter((item: any) => item.quantity_requested > item.quantity_bought);
+      });
+      return { previousList };
+    },
+    onError: (error: any, variables, context) => {
+      if (context?.previousList) queryClient.setQueryData(['shoppingList', houseId], context.previousList);
+      Alert.alert('Erro', 'A compra falhou offline.');
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
       queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
-    onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
   const deleteMutation = useMutation({
     mutationFn: shoppingService.deleteItem,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] }),
-    onError: (error: any) => Alert.alert('Erro', error.message)
   });
+
+  const resolveSuggestionMutation = useMutation({
+    mutationFn: (sug: any) => pantryService.updateItemStatus(sug.id, houseId, userId, 'AVAILABLE', sug.product_name, sug.unit),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
+    }
+  });
+
+  const removePantryItemMutation = useMutation({
+    mutationFn: pantryService.deleteItem,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
+    }
+  });
+
+  // FUNÇÃO DE FEEDBACK DE SUGESTÃO
+  const handleSuggestionPress = (sug: any) => {
+    Alert.alert(
+      sug.product_name,
+      'Parece que este item está acabando. O que deseja fazer?',
+      [
+        { 
+          text: 'Adicionar à Lista', 
+          onPress: () => addMutation.mutate({ name: sug.product_name, qty: 1, unit: sug.unit, duration: sug.expected_duration_days }) 
+        },
+        { 
+          text: 'Ainda tenho / Já comprei', 
+          onPress: () => resolveSuggestionMutation.mutate(sug) 
+        },
+        { 
+          text: 'Não compro mais', 
+          onPress: () => removePantryItemMutation.mutate(sug.id),
+          style: 'destructive'
+        },
+        { text: 'Ignorar por agora', style: 'cancel' }
+      ]
+    );
+  };
 
   const handleBuy = (item: any, isPartial: boolean) => {
     const inputAmount = partialAmounts[item.id];
     const qtyToBuy = isPartial && inputAmount ? parseFloat(inputAmount) : (item.quantity_requested - item.quantity_bought);
-
     if (isNaN(qtyToBuy) || qtyToBuy <= 0) return Alert.alert('Aviso', 'Quantidade inválida');
-
-    purchaseMutation.mutate({
-      itemId: item.id, houseId, userId, productName: item.product_name,
-      quantityRequested: item.quantity_requested, quantityBoughtNow: qtyToBuy, unit: item.unit
-    });
+    purchaseMutation.mutate({ itemId: item.id, houseId, userId, productName: item.product_name, quantityRequested: item.quantity_requested, quantityBoughtNow: qtyToBuy, unit: item.unit });
   };
 
-  const handleAddItem = (nameOverride?: string, unitOverride?: string, durationOverride?: number) => {
+  const handleAddItem = (nameOverride?: string) => {
     const name = nameOverride || newItemName.trim();
     if (!name) return;
-    const qty = parseFloat(newItemQty) || 1;
-    const unit = unitOverride || newItemUnit.trim() || 'un';
-    const duration = durationOverride ?? parseInt(newItemDuration);
-    
-    addMutation.mutate({ name, qty, unit, duration: isNaN(duration) ? undefined : duration });
+    addMutation.mutate({ name, qty: parseFloat(newItemQty) || 1, unit: newItemUnit.trim() || 'un', duration: parseInt(newItemDuration) || undefined });
   };
 
-  const confirmDelete = (itemId: string, productName: string) => {
-    Alert.alert('Excluir Item', `Deseja remover ${productName} da lista?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Excluir', style: 'destructive', onPress: () => deleteMutation.mutate(itemId) }
-    ]);
-  };
-
-  if (isLoading) return <View style={styles.centered}><Text>Carregando lista...</Text></View>;
+  if (isLoading) return <View style={styles.centered}><Text>A carregar lista...</Text></View>;
   if (isError) return <View style={styles.centered}><Text>Erro ao carregar a lista.</Text></View>;
 
-  const activeSuggestions = suggestions?.filter(sug => 
-    !items?.some(item => item.product_name.toLowerCase() === sug.product_name.toLowerCase())
-  );
+  const activeSuggestions = suggestions?.filter(sug => !items?.some(item => item.product_name.toLowerCase() === sug.product_name.toLowerCase()));
 
   return (
     <View style={styles.container}>
@@ -106,18 +144,23 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
         <TextInput style={styles.inputName} placeholder="O que falta? (ex: Arroz)" value={newItemName} onChangeText={setNewItemName} />
         <View style={styles.row}>
           <TextInput style={styles.inputSmall} placeholder="Qtd" keyboardType="numeric" value={newItemQty} onChangeText={setNewItemQty} />
-          <TextInput style={styles.inputSmall} placeholder="Unid" value={newItemUnit} onChangeText={setNewItemUnit} autoCapitalize="none" />
+          <TextInput style={styles.inputSmall} placeholder="Unid" value={newItemUnit} autoCapitalize="none" onChangeText={setNewItemUnit} />
           <TextInput style={styles.inputMedium} placeholder="Dura (dias)" keyboardType="numeric" value={newItemDuration} onChangeText={setNewItemDuration} />
           <TouchableOpacity style={styles.addButton} onPress={() => handleAddItem()} disabled={addMutation.isPending}><Text style={styles.addButtonText}>+</Text></TouchableOpacity>
         </View>
       </View>
 
+      {/* Carrossel de Sugestões */}
       {activeSuggestions && activeSuggestions.length > 0 && (
         <View style={styles.suggestionsContainer}>
           <Text style={styles.suggestionsTitle}>Talvez precise:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll}>
             {activeSuggestions.map((sug) => (
-              <TouchableOpacity key={sug.id} style={styles.suggestionBadge} onPress={() => handleAddItem(sug.product_name, sug.unit, sug.expected_duration_days)}>
+              <TouchableOpacity 
+                key={sug.id} 
+                style={styles.suggestionBadge} 
+                onPress={() => handleSuggestionPress(sug)}
+              >
                 <Text style={styles.suggestionText}>+ {sug.product_name}</Text>
               </TouchableOpacity>
             ))}
@@ -133,16 +176,13 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
           <View style={styles.card}>
             <View style={styles.cardInfo}>
               <Text style={styles.product}>{item.product_name}</Text>
-              <Text style={styles.qty}>
-                Falta: {item.quantity_requested - item.quantity_bought} {item.unit}
-              </Text>
+              <Text style={styles.qty}>Falta: {item.quantity_requested - item.quantity_bought} {item.unit}</Text>
             </View>
-            
             <View style={styles.actions}>
               <TextInput style={styles.inputPartial} placeholder="Qtd" keyboardType="numeric" onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} />
               <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}><Text style={styles.btnText}>Parcial</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Comprei Tudo</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.btnDelete} onPress={() => confirmDelete(item.id, item.product_name)}><Text style={styles.btnText}>Remover</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Tudo</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.btnDelete} onPress={() => deleteMutation.mutate(item.id)}><Text style={styles.btnText}>X</Text></TouchableOpacity>
             </View>
           </View>
         )}
