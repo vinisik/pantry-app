@@ -11,22 +11,19 @@ interface ListScreenProps {
 
 export default function ListScreen({ session, houseId, onBack }: ListScreenProps) {
   const queryClient = useQueryClient();
-  const userId = session.user.id;
+  const userId = session?.user?.id;
 
   const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
-  
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
 
-  // Busca a lista de compras pendente
   const { data: items, isLoading, isError } = useQuery({
     queryKey: ['shoppingList', houseId],
     queryFn: () => shoppingService.getPendingItems(houseId),
   });
 
-  // Busca as sugestões da despensa (itens acabando)
   const { data: suggestions } = useQuery({
     queryKey: ['suggestions', houseId],
     queryFn: () => shoppingService.getSuggestions(houseId),
@@ -56,6 +53,12 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: shoppingService.deleteItem,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] }),
+    onError: (error: any) => Alert.alert('Erro', error.message)
+  });
+
   const handleBuy = (item: any, isPartial: boolean) => {
     const inputAmount = partialAmounts[item.id];
     const qtyToBuy = isPartial && inputAmount ? parseFloat(inputAmount) : (item.quantity_requested - item.quantity_bought);
@@ -63,36 +66,31 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     if (isNaN(qtyToBuy) || qtyToBuy <= 0) return Alert.alert('Aviso', 'Quantidade inválida');
 
     purchaseMutation.mutate({
-      itemId: item.id,
-      houseId: houseId,
-      userId: userId,
-      productName: item.product_name,
-      quantityRequested: item.quantity_requested,
-      quantityBoughtNow: qtyToBuy,
-      unit: item.unit
+      itemId: item.id, houseId, userId, productName: item.product_name,
+      quantityRequested: item.quantity_requested, quantityBoughtNow: qtyToBuy, unit: item.unit
     });
   };
 
   const handleAddItem = (nameOverride?: string, unitOverride?: string, durationOverride?: number) => {
     const name = nameOverride || newItemName.trim();
     if (!name) return;
-    
     const qty = parseFloat(newItemQty) || 1;
     const unit = unitOverride || newItemUnit.trim() || 'un';
     const duration = durationOverride ?? parseInt(newItemDuration);
     
-    addMutation.mutate({
-      name,
-      qty,
-      unit,
-      duration: isNaN(duration) ? undefined : duration
-    });
+    addMutation.mutate({ name, qty, unit, duration: isNaN(duration) ? undefined : duration });
+  };
+
+  const confirmDelete = (itemId: string, productName: string) => {
+    Alert.alert('Excluir Item', `Deseja remover ${productName} da lista?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => deleteMutation.mutate(itemId) }
+    ]);
   };
 
   if (isLoading) return <View style={styles.centered}><Text>Carregando lista...</Text></View>;
   if (isError) return <View style={styles.centered}><Text>Erro ao carregar a lista.</Text></View>;
 
-  // Filtra as sugestões para não mostrar itens que já estão na lista de compras
   const activeSuggestions = suggestions?.filter(sug => 
     !items?.some(item => item.product_name.toLowerCase() === sug.product_name.toLowerCase())
   );
@@ -100,40 +98,26 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>{"< Voltar"}</Text>
-        </TouchableOpacity>
+        <TouchableOpacity onPress={onBack} style={styles.backButton}><Text style={styles.backText}>{"< Voltar"}</Text></TouchableOpacity>
         <Text style={styles.title}>Faltando em Casa</Text>
       </View>
 
       <View style={styles.addForm}>
-        <TextInput
-          style={styles.inputName}
-          placeholder="O que falta? (ex: Arroz)"
-          value={newItemName}
-          onChangeText={setNewItemName}
-        />
+        <TextInput style={styles.inputName} placeholder="O que falta? (ex: Arroz)" value={newItemName} onChangeText={setNewItemName} />
         <View style={styles.row}>
           <TextInput style={styles.inputSmall} placeholder="Qtd" keyboardType="numeric" value={newItemQty} onChangeText={setNewItemQty} />
           <TextInput style={styles.inputSmall} placeholder="Unid" value={newItemUnit} onChangeText={setNewItemUnit} autoCapitalize="none" />
           <TextInput style={styles.inputMedium} placeholder="Dura (dias)" keyboardType="numeric" value={newItemDuration} onChangeText={setNewItemDuration} />
-          <TouchableOpacity style={styles.addButton} onPress={() => handleAddItem()} disabled={addMutation.isPending}>
-            <Text style={styles.addButtonText}>+</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => handleAddItem()} disabled={addMutation.isPending}><Text style={styles.addButtonText}>+</Text></TouchableOpacity>
         </View>
       </View>
 
-      {/* Carrossel de Sugestões Inteligentes */}
       {activeSuggestions && activeSuggestions.length > 0 && (
         <View style={styles.suggestionsContainer}>
           <Text style={styles.suggestionsTitle}>Talvez precise:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll}>
             {activeSuggestions.map((sug) => (
-              <TouchableOpacity 
-                key={sug.id} 
-                style={styles.suggestionBadge}
-                onPress={() => handleAddItem(sug.product_name, sug.unit, sug.expected_duration_days)}
-              >
+              <TouchableOpacity key={sug.id} style={styles.suggestionBadge} onPress={() => handleAddItem(sug.product_name, sug.unit, sug.expected_duration_days)}>
                 <Text style={styles.suggestionText}>+ {sug.product_name}</Text>
               </TouchableOpacity>
             ))}
@@ -147,22 +131,18 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
         ListEmptyComponent={<Text style={styles.empty}>Sua lista de compras está vazia.</Text>}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <View>
+            <View style={styles.cardInfo}>
               <Text style={styles.product}>{item.product_name}</Text>
               <Text style={styles.qty}>
                 Falta: {item.quantity_requested - item.quantity_bought} {item.unit}
-                {item.expected_duration_days ? ` • Dura ~${item.expected_duration_days} dias` : ''}
               </Text>
             </View>
             
             <View style={styles.actions}>
               <TextInput style={styles.inputPartial} placeholder="Qtd" keyboardType="numeric" onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} />
-              <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}>
-                <Text style={styles.btnText}>Parcial</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}>
-                <Text style={styles.btnText}>Comprei Tudo</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}><Text style={styles.btnText}>Parcial</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Comprei Tudo</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.btnDelete} onPress={() => confirmDelete(item.id, item.product_name)}><Text style={styles.btnText}>Remover</Text></TouchableOpacity>
             </View>
           </View>
         )}
@@ -185,21 +165,20 @@ const styles = StyleSheet.create({
   inputMedium: { flex: 1.5, borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 6, backgroundColor: '#fafafa' },
   addButton: { backgroundColor: '#2196F3', width: 45, justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
   addButtonText: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginTop: -2 },
-  
-  // Estilos das Sugestões
   suggestionsContainer: { marginBottom: 16 },
   suggestionsTitle: { fontSize: 14, fontWeight: 'bold', color: '#666', marginBottom: 8 },
   suggestionsScroll: { flexDirection: 'row' },
   suggestionBadge: { backgroundColor: '#E3F2FD', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#BBDEFB' },
   suggestionText: { color: '#1976D2', fontWeight: 'bold' },
-  
   empty: { textAlign: 'center', color: '#666', marginTop: 40, fontSize: 16 },
-  card: { backgroundColor: '#fff', padding: 16, marginBottom: 12, borderRadius: 8, elevation: 1 },
+  card: { backgroundColor: '#fff', padding: 12, marginBottom: 12, borderRadius: 8, elevation: 1 },
+  cardInfo: { marginBottom: 8 },
   product: { fontSize: 18, fontWeight: '600' },
-  qty: { color: '#666', marginBottom: 12 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  inputPartial: { borderWidth: 1, borderColor: '#ddd', padding: 8, width: 60, borderRadius: 4, backgroundColor: '#fafafa' },
-  btnPartial: { backgroundColor: '#FF9800', padding: 10, borderRadius: 4 },
-  btnComplete: { backgroundColor: '#4CAF50', padding: 10, borderRadius: 4 },
-  btnText: { color: '#fff', fontWeight: 'bold' }
+  qty: { color: '#666' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  inputPartial: { borderWidth: 1, borderColor: '#ddd', padding: 8, width: 45, borderRadius: 4, backgroundColor: '#fafafa', textAlign: 'center' },
+  btnPartial: { backgroundColor: '#FF9800', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
+  btnComplete: { backgroundColor: '#4CAF50', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
+  btnDelete: { backgroundColor: '#F44336', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
+  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 }
 });

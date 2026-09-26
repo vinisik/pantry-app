@@ -115,4 +115,14 @@ export const shoppingService = {
     return data;
   },
 
+  // Exclui um item da lista de compras
+  async deleteItem(itemId: string) {
+    const { error } = await supabase
+      .from('shopping_list_items')
+      .delete()
+      .eq('id', itemId);
+
+    if (error) throw new Error(`Erro ao excluir item: ${error.message}`);
+  },
+
 };
