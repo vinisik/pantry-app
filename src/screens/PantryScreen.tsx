@@ -71,7 +71,7 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
             <View style={styles.cardInfo}>
               <Text style={styles.product}>{item.product_name}</Text>
               <Text style={[styles.statusText, item.status === 'RUNNING_LOW' ? styles.textLow : styles.textOk]}>
-                {item.status === 'AVAILABLE' ? '✨ Em boa quantidade' : '⚠️ A acabar'} ({item.unit})
+                {item.status === 'AVAILABLE' ? '✨ Em boa quantidade' : '⚠️ Acabando'} ({item.unit})
               </Text>
               {item.expected_duration_days && (
                 <Text style={styles.durationText}>Ritmo estimado: ~{item.expected_duration_days} dias</Text>

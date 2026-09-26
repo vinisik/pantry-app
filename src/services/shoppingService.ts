@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { pantryService } from './pantryService';
 
 export const shoppingService = {
   async getPendingItems(houseId: string) {
@@ -30,6 +31,7 @@ export const shoppingService = {
   },
 
   async confirmPurchase(params: { itemId: string, houseId: string, userId: string, productName: string, quantityRequested: number, quantityBoughtNow: number, unit: string }) {
+    // 1. Busca o item atual na lista de compras
     const { data: current } = await supabase
       .from('shopping_list')
       .select('quantity_bought, quantity_requested')
@@ -48,29 +50,25 @@ export const shoppingService = {
       await supabase.from('shopping_list').update({ quantity_bought: newBought }).eq('id', params.itemId);
     }
 
-    const { data: existingPantry } = await supabase
+    // 2. Procura primeiro se o produto já existe na tabela pantry_items (mesmo que estivesse esgotado)
+    const { data: existingPantryItem } = await supabase
       .from('pantry_items')
       .select('id')
       .eq('house_id', params.houseId)
-      .ilike('product_name', params.productName)
-      .single();
+      .ilike('product_name', params.productName.trim())
+      .maybeSingle();
 
-    if (existingPantry) {
-      await supabase
-        .from('pantry_items')
-        .update({ status: 'AVAILABLE', updated_at: new Date() })
-        .eq('id', existingPantry.id);
-    } else {
-      await supabase
-        .from('pantry_items')
-        .insert([{
-          house_id: params.houseId,
-          user_id: params.userId,
-          product_name: params.productName,
-          unit: params.unit,
-          status: 'AVAILABLE'
-        }]);
-    }
+    const pantryIdToUpdate = existingPantryItem ? existingPantryItem.id : 'new';
+
+    // 3. Atualiza ou insere na despensa alterando o estado para AVAILABLE
+    await pantryService.updateItemStatus(
+      pantryIdToUpdate, 
+      params.houseId, 
+      params.userId, 
+      'AVAILABLE', 
+      params.productName, 
+      params.unit
+    );
   },
 
   async deleteItem(itemId: string) {

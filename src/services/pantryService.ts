@@ -14,29 +14,54 @@ export const pantryService = {
   },
 
   async updateItemStatus(itemId: string, houseId: string, userId: string, newStatus: 'AVAILABLE' | 'RUNNING_LOW' | 'OUT_OF_STOCK', productName: string, unit: string) {
+    let targetId = itemId;
+
+    if (!targetId || targetId === 'new') {
+      const { data: existing } = await supabase
+        .from('pantry_items')
+        .select('id')
+        .eq('house_id', houseId)
+        .ilike('product_name', productName.trim())
+        .maybeSingle();
+
+      if (existing) {
+        targetId = existing.id;
+      } else {
+        // Insere apenas as colunas válidas da tabela pantry_items
+        const { data: inserted, error: insertError } = await supabase
+          .from('pantry_items')
+          .insert({
+            house_id: houseId,
+            product_name: productName.trim(),
+            unit: unit || 'un',
+            status: newStatus
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          throw new Error(`Falha ao adicionar à despensa: ${insertError.message}`);
+        }
+        targetId = inserted.id;
+      }
+    }
+
     const { error: updateError } = await supabase
       .from('pantry_items')
       .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', itemId);
+      .eq('id', targetId);
 
     if (updateError) throw new Error('Falha ao atualizar a despensa.');
 
-    await supabase.from('house_events').insert({
-      house_id: houseId,
-      actor_id: userId,
-      event_type: `PANTRY_STATUS_${newStatus}`,
-      payload: { item_id: itemId, product_name: productName, unit }
-    });
-
-    if (newStatus === 'OUT_OF_STOCK') {
-      await supabase.from('shopping_list_items').insert({
+    // Regista o evento na casa 
+    try {
+      await supabase.from('house_events').insert({
         house_id: houseId,
-        product_name: productName,
-        quantity_requested: 1, 
-        unit: unit,
-        status: 'PENDING',
-        created_by: userId
+        actor_id: userId,
+        event_type: `PANTRY_STATUS_${newStatus}`,
+        payload: { item_id: targetId, product_name: productName, unit }
       });
+    } catch {
     }
   },
 
@@ -56,10 +81,7 @@ export const pantryService = {
 
     for (const item of data) {
       const updatedAt = new Date(item.updated_at).getTime();
-      // Calcula quantos dias se passaram desde a última compra
       const daysPassed = (now - updatedAt) / (1000 * 60 * 60 * 24);
-      
-      // Se passou de 80% da duração esperada, marca como "Acabando"
       const threshold = item.expected_duration_days * 0.8;
 
       if (daysPassed >= threshold) {

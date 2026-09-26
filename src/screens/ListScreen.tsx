@@ -48,6 +48,9 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
       queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
+    onError: (error: any) => {
+      Alert.alert('Erro', error.message || 'A compra falhou.');
+    },
   });
 
   const deleteMutation = useMutation({
