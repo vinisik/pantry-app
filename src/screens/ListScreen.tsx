@@ -1,10 +1,8 @@
-// src/screens/ListScreen.tsx
 import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shoppingService } from '../services/shoppingService';
 
-// Definindo as propriedades que a tela vai receber do App.tsx
 interface ListScreenProps {
   session: any;
   houseId: string;
@@ -13,9 +11,10 @@ interface ListScreenProps {
 
 export default function ListScreen({ session, houseId, onBack }: ListScreenProps) {
   const queryClient = useQueryClient();
-  const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
-
   const userId = session.user.id;
+
+  const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
+  const [newItemName, setNewItemName] = useState('');
 
   const { data: items, isLoading, isError } = useQuery({
     queryKey: ['shoppingList', houseId],
@@ -26,10 +25,20 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     mutationFn: shoppingService.confirmPurchase,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
     },
     onError: (error: any) => {
       Alert.alert('Erro', error.message || 'Falha ao salvar. Verifique a conexão.');
     }
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (name: string) => shoppingService.addItem(houseId, userId, name),
+    onSuccess: () => {
+      setNewItemName('');
+      queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+    },
+    onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
   const handleBuy = (item: any, isPartial: boolean) => {
@@ -51,6 +60,12 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     });
   };
 
+  const handleAddItem = () => {
+    if (newItemName.trim()) {
+      addMutation.mutate(newItemName.trim());
+    }
+  };
+
   if (isLoading) return <View style={styles.centered}><Text>Carregando lista...</Text></View>;
   if (isError) return <View style={styles.centered}><Text>Erro ao carregar a lista. Tente novamente.</Text></View>;
 
@@ -60,7 +75,24 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Text style={styles.backText}>{"< Voltar"}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Faltando em Residência</Text>
+        <Text style={styles.title}>Faltando em Casa</Text>
+      </View>
+
+      <View style={styles.addSection}>
+        <TextInput
+          style={styles.addInput}
+          placeholder="Adicionar novo item..."
+          value={newItemName}
+          onChangeText={setNewItemName}
+          onSubmitEditing={handleAddItem}
+        />
+        <TouchableOpacity 
+          style={styles.addButton} 
+          onPress={handleAddItem}
+          disabled={addMutation.isPending}
+        >
+          <Text style={styles.addButtonText}>+</Text>
+        </TouchableOpacity>
       </View>
       
       <FlatList
@@ -113,6 +145,10 @@ const styles = StyleSheet.create({
   backButton: { marginRight: 16, padding: 8 },
   backText: { color: '#2196F3', fontWeight: 'bold', fontSize: 16 },
   title: { fontSize: 24, fontWeight: 'bold' },
+  addSection: { flexDirection: 'row', marginBottom: 16, gap: 8 },
+  addInput: { flex: 1, borderWidth: 1, borderColor: '#ddd', padding: 12, borderRadius: 8, backgroundColor: '#fff' },
+  addButton: { backgroundColor: '#2196F3', width: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
+  addButtonText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
   empty: { textAlign: 'center', color: '#666', marginTop: 40, fontSize: 16 },
   card: { backgroundColor: '#fff', padding: 16, marginBottom: 12, borderRadius: 8, elevation: 1 },
   product: { fontSize: 18, fontWeight: '600' },

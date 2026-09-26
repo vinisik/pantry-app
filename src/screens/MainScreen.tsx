@@ -19,7 +19,7 @@ export default function MainScreen({ session, houseId, onBack }: MainScreenProps
         {activeTab === 'LIST' ? (
           <ListScreen session={session} houseId={houseId} onBack={onBack} />
         ) : (
-          <PantryScreen houseId={houseId} />
+          <PantryScreen session={session} houseId={houseId} />
         )}
       </View>
       

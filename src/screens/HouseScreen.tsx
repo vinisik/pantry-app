@@ -41,7 +41,7 @@ export default function HouseScreen({ session, onSelectHouse }: { session: any, 
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>As Minhas Residências</Text>
+      <Text style={styles.title}>Minhas Residências</Text>
       
       <FlatList
         data={houses}
