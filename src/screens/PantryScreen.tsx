@@ -21,13 +21,12 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
     mutationFn: () => pantryService.checkAndAutoUpdateLowStock(houseId, userId),
     onSuccess: (updatedCount) => {
       if (updatedCount > 0) {
-        refetch(); // Recarrega a lista automaticamente em segundo plano
+        refetch();
         queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
       }
     }
   });
 
-  // Corre a verificação sempre que a tela é renderizada
   useEffect(() => {
     aiCheckMutation.mutate();
   }, []);
@@ -47,28 +46,35 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
     statusMutation.mutate({ id: item.id, name: item.product_name, unit: item.unit, status: newStatus });
   };
 
-  if (isLoading) return <View style={styles.centered}><Text>Calculando despensa...</Text></View>;
-  if (isError) return <View style={styles.centered}><Text>Erro ao carregar a despensa.</Text></View>;
+  if (isLoading) return <View style={styles.centered}><Text style={styles.loadingText}>Calculando despensa...</Text></View>;
+  if (isError) return <View style={styles.centered}><Text style={styles.errorText}>Erro ao carregar a despensa.</Text></View>;
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Em Casa (Estimativa)</Text>
+        <Text style={styles.title}>📦 Despensa em Casa</Text>
+        <Text style={styles.subtitle}>Controle inteligente da sua despensa</Text>
       </View>
       
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
-        ListEmptyComponent={<Text style={styles.empty}>Sua despensa está vazia. Confirme compras na aba Faltando para alimentá-la.</Text>}
+        contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyEmoji}>🛒</Text>
+            <Text style={styles.emptyText}>Sua despensa está vazia. Confirme compras na aba Faltando para alimentá-la.</Text>
+          </View>
+        }
         renderItem={({ item }) => (
           <View style={[styles.card, item.status === 'RUNNING_LOW' && styles.cardLow]}>
-            <View>
+            <View style={styles.cardInfo}>
               <Text style={styles.product}>{item.product_name}</Text>
-              <Text style={styles.statusText}>
-                {item.status === 'AVAILABLE' ? 'Em boa quantidade' : 'Acabando'} ({item.unit})
+              <Text style={[styles.statusText, item.status === 'RUNNING_LOW' ? styles.textLow : styles.textOk]}>
+                {item.status === 'AVAILABLE' ? '✨ Em boa quantidade' : '⚠️ A acabar'} ({item.unit})
               </Text>
               {item.expected_duration_days && (
-                <Text style={styles.durationText}>Ritmo: ~{item.expected_duration_days} dias</Text>
+                <Text style={styles.durationText}>Ritmo estimado: ~{item.expected_duration_days} dias</Text>
               )}
             </View>
             
@@ -95,20 +101,29 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#f5f5f5', marginTop: 30 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: 'bold' },
-  empty: { textAlign: 'center', color: '#666', marginTop: 40, fontSize: 16, paddingHorizontal: 20 },
-  card: { backgroundColor: '#fff', padding: 16, marginBottom: 12, borderRadius: 8, elevation: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardLow: { borderLeftWidth: 4, borderLeftColor: '#FF9800' },
-  product: { fontSize: 18, fontWeight: '600' },
-  statusText: { color: '#666', marginTop: 4 },
-  durationText: { color: '#999', fontSize: 12, marginTop: 2, fontStyle: 'italic' },
-  actions: { flexDirection: 'row', gap: 8 },
-  btn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 4 },
-  btnOk: { backgroundColor: '#4CAF50' },
-  btnLow: { backgroundColor: '#FF9800' },
-  btnOut: { backgroundColor: '#F44336' },
-  btnText: { color: '#fff', fontWeight: 'bold' }
+  container: { flex: 1, backgroundColor: '#F8F9FA', paddingTop: 50 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
+  loadingText: { color: '#6C757D', fontSize: 15, fontWeight: '500' },
+  errorText: { color: '#D32F2F', fontSize: 15, fontWeight: '500' },
+  header: { paddingHorizontal: 20, marginBottom: 16 },
+  title: { fontSize: 24, fontWeight: '700', color: '#1C1C1E' },
+  subtitle: { fontSize: 14, color: '#6C757D', marginTop: 2 },
+  listContainer: { paddingHorizontal: 20, paddingBottom: 20 },
+  emptyContainer: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20 },
+  emptyEmoji: { fontSize: 48, marginBottom: 12 },
+  emptyText: { textAlign: 'center', color: '#6C757D', fontSize: 15, lineHeight: 22 },
+  card: { backgroundColor: '#FFFFFF', padding: 16, marginBottom: 12, borderRadius: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderLeftWidth: 4, borderLeftColor: '#2E7D32' },
+  cardLow: { borderLeftColor: '#F57C00' },
+  cardInfo: { flex: 1, marginRight: 12 },
+  product: { fontSize: 17, fontWeight: '600', color: '#1C1C1E' },
+  statusText: { fontSize: 13, marginTop: 4, fontWeight: '500' },
+  textOk: { color: '#2E7D32' },
+  textLow: { color: '#F57C00' },
+  durationText: { color: '#8E8E93', fontSize: 12, marginTop: 4, fontStyle: 'italic' },
+  actions: { flexDirection: 'row', gap: 6 },
+  btn: { paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  btnOk: { backgroundColor: '#E8F5E9' },
+  btnLow: { backgroundColor: '#FFF3E0' },
+  btnOut: { backgroundColor: '#FFEBEE' },
+  btnText: { color: '#1C1C1E', fontWeight: '600', fontSize: 12 }
 });
