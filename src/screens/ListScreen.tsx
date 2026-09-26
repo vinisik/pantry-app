@@ -189,8 +189,8 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
             </View>
             <View style={styles.actions}>
               <TextInput style={styles.inputPartial} placeholder="Qtd" keyboardType="numeric" onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} />
+              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Comprei tudo</Text></TouchableOpacity>
               <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}><Text style={styles.btnText}>Parcial</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Tudo</Text></TouchableOpacity>
               <TouchableOpacity style={styles.btnDelete} onPress={() => deleteMutation.mutate(item.id)}><Text style={styles.btnText}>Remover</Text></TouchableOpacity>
             </View>
           </View>

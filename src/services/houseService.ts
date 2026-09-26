@@ -76,6 +76,57 @@ export const houseService = {
       .eq('id', preferenceId);
 
     if (error) throw new Error(`Erro ao remover: ${error.message}`);
-  }
+  },
+
+  // Busca os participantes de uma casa específica
+  async getHouseParticipants(houseId: string) {
+    const { data, error } = await supabase
+      .from('house_participants')
+      .select('*')
+      .eq('house_id', houseId);
+
+    if (error) throw new Error(`Erro ao buscar participantes: ${error.message}`);
+    return data;
+  },
+
+  // Altera o papel de um participante 
+  async updateParticipantRole(houseId: string, userId: string, newRole: 'ADMIN' | 'MEMBER') {
+    const { error } = await supabase
+      .from('house_participants')
+      .update({ role: newRole })
+      .eq('house_id', houseId)
+      .eq('user_id', userId);
+
+    if (error) throw new Error(`Erro ao atualizar papel: ${error.message}`);
+  },
+
+  // Permite a um user juntar-se a uma casa existente através do ID
+  async joinHouse(houseId: string, userId: string) {
+    // Verifica se a casa realmente existe
+    const { data: house, error: houseError } = await supabase
+      .from('houses')
+      .select('id')
+      .eq('id', houseId)
+      .single();
+
+    if (houseError || !house) throw new Error('Casa não encontrada. Verifique o código.');
+
+    // Verifica se o user já faz parte desta casa
+    const { data: existing } = await supabase
+      .from('house_participants')
+      .select('user_id')
+      .eq('house_id', houseId)
+      .eq('user_id', userId)
+      .single();
+
+    if (existing) throw new Error('Você já faz parte desta residência.');
+
+    // Insere o novo membro como 'MEMBER'
+    const { error: insertError } = await supabase
+      .from('house_participants')
+      .insert([{ house_id: houseId, user_id: userId, role: 'MEMBER' }]);
+
+    if (insertError) throw new Error(`Erro ao entrar na casa: ${insertError.message}`);
+  },
 
 };
