@@ -1,5 +1,4 @@
-// src/screens/PantryScreen.tsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pantryService } from '../services/pantryService';
@@ -13,10 +12,25 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
   const queryClient = useQueryClient();
   const userId = session.user.id;
 
-  const { data: items, isLoading, isError } = useQuery({
+  const { data: items, isLoading, isError, refetch } = useQuery({
     queryKey: ['pantry', houseId],
     queryFn: () => pantryService.getEstimatedPantry(houseId),
   });
+
+  const aiCheckMutation = useMutation({
+    mutationFn: () => pantryService.checkAndAutoUpdateLowStock(houseId, userId),
+    onSuccess: (updatedCount) => {
+      if (updatedCount > 0) {
+        refetch(); // Recarrega a lista automaticamente em segundo plano
+        queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+      }
+    }
+  });
+
+  // Corre a verificação sempre que a tela é renderizada
+  useEffect(() => {
+    aiCheckMutation.mutate();
+  }, []);
 
   const statusMutation = useMutation({
     mutationFn: (params: any) => pantryService.updateItemStatus(
@@ -24,7 +38,7 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
     ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
-      queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] }); // Atualiza a lista caso algo tenha "acabado"
+      queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] }); 
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
@@ -38,7 +52,9 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Em Casa (Estimativa)</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Em Casa (Estimativa)</Text>
+      </View>
       
       <FlatList
         data={items}
@@ -51,29 +67,23 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
               <Text style={styles.statusText}>
                 {item.status === 'AVAILABLE' ? 'Em boa quantidade' : 'Acabando'} ({item.unit})
               </Text>
+              {item.expected_duration_days && (
+                <Text style={styles.durationText}>Ritmo: ~{item.expected_duration_days} dias</Text>
+              )}
             </View>
             
             <View style={styles.actions}>
               {item.status === 'RUNNING_LOW' && (
-                <TouchableOpacity 
-                  style={[styles.btn, styles.btnOk]} 
-                  onPress={() => handleStatusChange(item, 'AVAILABLE')}
-                >
+                <TouchableOpacity style={[styles.btn, styles.btnOk]} onPress={() => handleStatusChange(item, 'AVAILABLE')}>
                   <Text style={styles.btnText}>Tenho</Text>
                 </TouchableOpacity>
               )}
               {item.status === 'AVAILABLE' && (
-                <TouchableOpacity 
-                  style={[styles.btn, styles.btnLow]} 
-                  onPress={() => handleStatusChange(item, 'RUNNING_LOW')}
-                >
+                <TouchableOpacity style={[styles.btn, styles.btnLow]} onPress={() => handleStatusChange(item, 'RUNNING_LOW')}>
                   <Text style={styles.btnText}>Acabando</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity 
-                style={[styles.btn, styles.btnOut]} 
-                onPress={() => handleStatusChange(item, 'OUT_OF_STOCK')}
-              >
+              <TouchableOpacity style={[styles.btn, styles.btnOut]} onPress={() => handleStatusChange(item, 'OUT_OF_STOCK')}>
                 <Text style={styles.btnText}>Acabou</Text>
               </TouchableOpacity>
             </View>
@@ -87,12 +97,14 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: '#f5f5f5', marginTop: 30 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  title: { fontSize: 24, fontWeight: 'bold' },
   empty: { textAlign: 'center', color: '#666', marginTop: 40, fontSize: 16, paddingHorizontal: 20 },
   card: { backgroundColor: '#fff', padding: 16, marginBottom: 12, borderRadius: 8, elevation: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardLow: { borderLeftWidth: 4, borderLeftColor: '#FF9800' },
   product: { fontSize: 18, fontWeight: '600' },
   statusText: { color: '#666', marginTop: 4 },
+  durationText: { color: '#999', fontSize: 12, marginTop: 2, fontStyle: 'italic' },
   actions: { flexDirection: 'row', gap: 8 },
   btn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 4 },
   btnOk: { backgroundColor: '#4CAF50' },

@@ -1,45 +1,45 @@
 import { supabase } from '../lib/supabase';
 
 export const houseService = {
-  // Cria uma nova residência e adiciona o criador como membro principal 
-  async createHouse(name: string, userId: string) {
+  async createHouse(name: string, userId: string, residentCount: number = 1) {
     const { data: house, error: houseError } = await supabase
       .from('houses')
-      .insert([{ name }])
-      .select('id')
+      .insert([{ name, resident_count: residentCount }])
+      .select('id, name, resident_count')
       .single();
 
-    if (houseError) {
-      console.error("ERRO AO INSERIR RESIDENCIA:", houseError);
-      throw new Error(`Erro banco (Residência): ${houseError.message}`);
-    }
+    if (houseError || !house) throw new Error(`Erro ao criar casa: ${houseError?.message}`);
 
     const { error: participantError } = await supabase
       .from('house_participants')
       .insert([{ house_id: house.id, user_id: userId, role: 'ADMIN' }]);
 
-    if (participantError) {
-      console.error("ERRO AO INSERIR PARTICIPANTE:", participantError);
-      throw new Error(`Erro banco (Participante): ${participantError.message}`);
-    }
+    if (participantError) throw new Error(`Erro ao vincular morador: ${participantError.message}`);
 
     return house;
   },
 
-  // Busca todas as Residências às quais o usuário logado pertence
   async getUserHouses(userId: string) {
     const { data, error } = await supabase
       .from('house_participants')
-      .select('house_id, houses(name)')
+      .select('house_id, houses(name, resident_count)')
       .eq('user_id', userId);
 
-    if (error) {
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
     
     return data.map((d: any) => ({ 
       id: d.house_id, 
-      name: d.houses?.name || 'Residência Desconhecida' 
+      name: d.houses?.name || 'Casa Desconhecida',
+      residentCount: d.houses?.resident_count || 1
     }));
+  },
+
+  async updateHouse(houseId: string, name: string, residentCount: number) {
+    const { error } = await supabase
+      .from('houses')
+      .update({ name, resident_count: residentCount })
+      .eq('id', houseId);
+
+    if (error) throw new Error(`Falha ao atualizar a casa: ${error.message}`);
   }
 };

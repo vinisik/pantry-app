@@ -26,47 +26,41 @@ export const shoppingService = {
   },
 
   // Adiciona um novo item na lista de compras
-  async addItem(houseId: string, userId: string, productName: string) {
+  // Adiciona um novo item na lista com quantidade, unidade e inteligência de duração
+  async addItem(houseId: string, userId: string, productName: string, quantity: number, unit: string, durationDays?: number) {
     const { error } = await supabase.from('shopping_list_items').insert({
       house_id: houseId,
       product_name: productName,
-      quantity_requested: 1, 
-      unit: 'un', 
+      quantity_requested: quantity, 
+      unit: unit, 
       status: 'PENDING',
-      created_by: userId
+      created_by: userId,
+      expected_duration_days: durationDays || null
     });
 
     if (error) throw new Error(`Erro ao adicionar item: ${error.message}`);
     
-    // Registra a intenção de compra
     await supabase.from('house_events').insert({
       house_id: houseId,
       actor_id: userId,
       event_type: 'ITEM_ADDED',
-      payload: { product_name: productName, unit: 'un' }
+      payload: { product_name: productName, quantity, unit, expected_duration: durationDays }
     });
   },
-  // Confirma compra total ou parcial com idempotência e log para ML, além de alimentar a despensa
+
   async confirmPurchase(params: BuyItemParams) {
-    // Verificar estado atual 
     const { data: currentItem, error: fetchError } = await supabase
       .from('shopping_list_items')
-      .select('quantity_bought, status')
+      .select('quantity_bought, status, expected_duration_days')
       .eq('id', params.itemId)
       .single();
 
-    if (fetchError || !currentItem) {
-      throw new Error('Item não encontrado ou erro de rede.');
-    }
-    
-    if (currentItem.status === 'COMPLETED') {
-      return { success: true, isCompleted: true }; // Já foi comprado por outro morador
-    }
+    if (fetchError || !currentItem) throw new Error('Item não encontrado ou erro de rede.');
+    if (currentItem.status === 'COMPLETED') return { success: true, isCompleted: true };
 
     const newTotalBought = currentItem.quantity_bought + params.quantityBoughtNow;
     const isCompleted = newTotalBought >= params.quantityRequested;
 
-    // Atualizar o item na lista de compras
     const { error: updateError } = await supabase
       .from('shopping_list_items')
       .update({
@@ -76,11 +70,8 @@ export const shoppingService = {
       })
       .eq('id', params.itemId);
 
-    if (updateError) {
-      throw new Error('Falha ao registrar compra. Tente novamente.');
-    }
+    if (updateError) throw new Error('Falha ao registrar compra.');
 
-    // Registrar o evento histórico 
     await supabase.from('house_events').insert({
       house_id: params.houseId,
       actor_id: params.userId,
@@ -89,24 +80,24 @@ export const shoppingService = {
         item_id: params.itemId,
         product_name: params.productName,
         quantity_added: params.quantityBoughtNow,
-        unit: params.unit,
-        is_special_occasion: false // Preparo para a funcionalidade de ocasiões especiais
+        unit: params.unit
       }
     });
 
-    // Alimentar a Despensa 
-    const { error: pantryError } = await supabase
-      .from('pantry_items')
-      .upsert({
-        house_id: params.houseId,
-        product_name: params.productName,
-        unit: params.unit,
-        status: 'AVAILABLE',
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'house_id, product_name, unit' });
+    // Se completou a compra, alimenta a despensa levando a expectativa de duração junto
+    if (isCompleted) {
+      const { error: pantryError } = await supabase
+        .from('pantry_items')
+        .upsert({
+          house_id: params.houseId,
+          product_name: params.productName,
+          unit: params.unit,
+          status: 'AVAILABLE',
+          expected_duration_days: currentItem.expected_duration_days,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'house_id, product_name, unit' });
 
-    if (pantryError) {
-      console.warn("Aviso: Falha ao sincronizar despensa", pantryError);
+      if (pantryError) console.warn("Aviso: Falha ao sincronizar despensa", pantryError);
     }
 
     return { success: true, isCompleted };
