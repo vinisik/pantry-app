@@ -19,6 +19,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
+  const [isSpecial, setIsSpecial] = useState(false);
 
   const { data: items, isLoading, isError } = useQuery({
     queryKey: ['shoppingList', houseId],
@@ -32,10 +33,10 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
 
   // Mutação para adicionar item
   const addMutation = useMutation({
-    mutationFn: (params: { name: string, qty: number, unit: string, duration?: number }) => 
-      shoppingService.addItem(houseId, userId, params.name, params.qty, params.unit, params.duration),
+    mutationFn: (params: { name: string, qty: number, unit: string, duration?: number, isSpecialOccasion: boolean }) => 
+      shoppingService.addItem(houseId, userId, params.name, params.qty, params.unit, params.duration, params.isSpecialOccasion),
     onSuccess: () => {
-      setNewItemName(''); setNewItemQty('1'); setNewItemUnit('un'); setNewItemDuration('');
+      setNewItemName(''); setNewItemQty('1'); setNewItemUnit('un'); setNewItemDuration(''); setIsSpecial(false);
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
       queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
@@ -99,7 +100,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       [
         { 
           text: 'Adicionar à Lista', 
-          onPress: () => addMutation.mutate({ name: sug.product_name, qty: 1, unit: sug.unit, duration: sug.expected_duration_days }) 
+          onPress: () => addMutation.mutate({ name: sug.product_name, qty: 1, unit: sug.unit, duration: sug.expected_duration_days, isSpecialOccasion: false }) 
         },
         { 
           text: 'Ainda tenho / Já comprei', 
@@ -125,7 +126,13 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   const handleAddItem = (nameOverride?: string) => {
     const name = nameOverride || newItemName.trim();
     if (!name) return;
-    addMutation.mutate({ name, qty: parseFloat(newItemQty) || 1, unit: newItemUnit.trim() || 'un', duration: parseInt(newItemDuration) || undefined });
+    addMutation.mutate({ 
+      name, 
+      qty: parseFloat(newItemQty) || 1, 
+      unit: newItemUnit.trim() || 'un', 
+      duration: parseInt(newItemDuration) || undefined,
+      isSpecialOccasion: isSpecial 
+    });
   };
 
   if (isLoading) return <View style={styles.centered}><Text>A carregar lista...</Text></View>;
@@ -175,14 +182,16 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
         renderItem={({ item }) => (
           <View style={styles.card}>
             <View style={styles.cardInfo}>
-              <Text style={styles.product}>{item.product_name}</Text>
+              <Text style={styles.product}>
+                {item.product_name} {item.is_special_occasion && '🎉'}
+              </Text>
               <Text style={styles.qty}>Falta: {item.quantity_requested - item.quantity_bought} {item.unit}</Text>
             </View>
             <View style={styles.actions}>
               <TextInput style={styles.inputPartial} placeholder="Qtd" keyboardType="numeric" onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} />
               <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}><Text style={styles.btnText}>Parcial</Text></TouchableOpacity>
               <TouchableOpacity style={styles.btnComplete} onPress={() => handleBuy(item, false)}><Text style={styles.btnText}>Tudo</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.btnDelete} onPress={() => deleteMutation.mutate(item.id)}><Text style={styles.btnText}>X</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.btnDelete} onPress={() => deleteMutation.mutate(item.id)}><Text style={styles.btnText}>Remover</Text></TouchableOpacity>
             </View>
           </View>
         )}
@@ -220,5 +229,9 @@ const styles = StyleSheet.create({
   btnPartial: { backgroundColor: '#FF9800', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
   btnComplete: { backgroundColor: '#4CAF50', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
   btnDelete: { backgroundColor: '#F44336', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 4 },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 }
+  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  specialToggle: { marginTop: 10, padding: 8, borderRadius: 6, backgroundColor: '#f0f0f0', alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
+  specialToggleActive: { backgroundColor: '#FFF9C4', borderColor: '#FBC02D' },
+  specialToggleText: { color: '#666', fontSize: 12, fontWeight: 'bold' },
+  specialToggleTextActive: { color: '#F57F17' },
 });

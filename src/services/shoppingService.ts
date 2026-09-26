@@ -27,25 +27,39 @@ export const shoppingService = {
 
   // Adiciona um novo item na lista de compras
   // Adiciona um novo item na lista com quantidade, unidade e inteligência de duração
-  async addItem(houseId: string, userId: string, productName: string, quantity: number, unit: string, durationDays?: number) {
-    const { error } = await supabase.from('shopping_list_items').insert({
-      house_id: houseId,
-      product_name: productName,
-      quantity_requested: quantity, 
-      unit: unit, 
-      status: 'PENDING',
-      created_by: userId,
-      expected_duration_days: durationDays || null
-    });
+  async addItem(houseId: string, userId: string, productName: string, qty: number, unit: string, duration?: number, isSpecialOccasion: boolean = false) {
+    // Verifica se já existe o mesmo produto pendente
+    const { data: existing } = await supabase
+      .from('shopping_list_items')
+      .select('id, quantity_requested')
+      .eq('house_id', houseId)
+      .ilike('product_name', productName) 
+      .gt('quantity_requested', 0)
+      .single();
 
-    if (error) throw new Error(`Erro ao adicionar item: ${error.message}`);
-    
-    await supabase.from('house_events').insert({
-      house_id: houseId,
-      actor_id: userId,
-      event_type: 'ITEM_ADDED',
-      payload: { product_name: productName, quantity, unit, expected_duration: durationDays }
-    });
+    if (existing) {
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .update({ 
+          quantity_requested: existing.quantity_requested + qty,
+          is_special_occasion: isSpecialOccasion 
+        })
+        .eq('id', existing.id);
+      if (error) throw new Error(`Erro ao atualizar item: ${error.message}`);
+    } else {
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .insert([{
+          house_id: houseId,
+          added_by: userId,
+          product_name: productName,
+          quantity_requested: qty,
+          unit: unit,
+          expected_duration_days: duration,
+          is_special_occasion: isSpecialOccasion 
+        }]);
+      if (error) throw new Error(`Erro ao adicionar item: ${error.message}`);
+    }
   },
 
   async confirmPurchase(params: BuyItemParams) {
