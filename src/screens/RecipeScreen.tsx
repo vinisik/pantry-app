@@ -100,12 +100,20 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   const addMissingToShoppingListMutation = useMutation({
     mutationFn: async (missingList: string[]) => {
       for (const itemName of missingList) {
-        await shoppingService.addItem(houseId, userId, itemName, 1, 'un', undefined, false);
+        // Encontra o ingrediente correspondente na receita para obter a quantidade e unidade exatas
+        const recipeIng = selectedRecipe?.recipe_ingredients?.find(
+          (ing: any) => ing.product_name.toLowerCase() === itemName.toLowerCase()
+        );
+
+        const quantity = recipeIng?.quantity || 1;
+        const unit = recipeIng?.unit || 'un';
+
+        await shoppingService.addItem(houseId, userId, itemName, quantity, unit, undefined, false);
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
-      Alert.alert('Sucesso!', 'Os ingredientes em falta foram adicionados à sua lista de compras.');
+      Alert.alert('Sucesso!', 'Os ingredientes em falta foram adicionados à sua lista de compras com as quantidades corretas.');
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
