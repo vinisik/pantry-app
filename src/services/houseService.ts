@@ -41,5 +41,41 @@ export const houseService = {
       .eq('id', houseId);
 
     if (error) throw new Error(`Falha ao atualizar a casa: ${error.message}`);
+  },
+
+  // Obtem as preferências de cada residencia
+  async getHousePreferences(houseId: string) {
+    const { data, error } = await supabase
+      .from('house_preferences')
+      .select('*')
+      .eq('house_id', houseId)
+      .order('type', { ascending: true })
+      .order('value', { ascending: true });
+
+    if (error) throw new Error(`Erro ao buscar preferências: ${error.message}`);
+    return data;
+  },
+
+  // Adiciona uma nova restrição ou preferência
+  async addPreference(houseId: string, type: 'RESTRICTION' | 'PREFERENCE', value: string) {
+    const { error } = await supabase
+      .from('house_preferences')
+      .insert([{ house_id: houseId, type, value: value.trim() }]);
+
+    if (error) {
+      if (error.code === '23505') throw new Error('Esta preferência/restrição já foi adicionada.');
+      throw new Error(`Erro ao adicionar: ${error.message}`);
+    }
+  },
+
+  // Remove uma restrição ou preferência
+  async removePreference(preferenceId: string) {
+    const { error } = await supabase
+      .from('house_preferences')
+      .delete()
+      .eq('id', preferenceId);
+
+    if (error) throw new Error(`Erro ao remover: ${error.message}`);
   }
+
 };
