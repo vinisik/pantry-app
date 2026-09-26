@@ -101,5 +101,18 @@ export const shoppingService = {
     }
 
     return { success: true, isCompleted };
-  }
+  },
+
+  // Busca itens que estão acabando na despensa para sugerir reposição
+  async getSuggestions(houseId: string) {
+    const { data, error } = await supabase
+      .from('pantry_items')
+      .select('*')
+      .eq('house_id', houseId)
+      .eq('status', 'RUNNING_LOW');
+
+    if (error) throw new Error(`Erro ao buscar sugestões: ${error.message}`);
+    return data;
+  },
+
 };

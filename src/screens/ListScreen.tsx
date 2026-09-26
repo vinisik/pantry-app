@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shoppingService } from '../services/shoppingService';
 
@@ -12,15 +12,24 @@ interface ListScreenProps {
 export default function ListScreen({ session, houseId, onBack }: ListScreenProps) {
   const queryClient = useQueryClient();
   const userId = session.user.id;
+
   const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
+  
   const [newItemName, setNewItemName] = useState('');
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
 
+  // Busca a lista de compras pendente
   const { data: items, isLoading, isError } = useQuery({
     queryKey: ['shoppingList', houseId],
     queryFn: () => shoppingService.getPendingItems(houseId),
+  });
+
+  // Busca as sugestões da despensa (itens acabando)
+  const { data: suggestions } = useQuery({
+    queryKey: ['suggestions', houseId],
+    queryFn: () => shoppingService.getSuggestions(houseId),
   });
 
   const purchaseMutation = useMutation({
@@ -28,6 +37,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
       queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
@@ -41,6 +51,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       setNewItemUnit('un');
       setNewItemDuration('');
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+      queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
@@ -62,21 +73,29 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     });
   };
 
-  const handleAddItem = () => {
-    if (!newItemName.trim()) return;
+  const handleAddItem = (nameOverride?: string, unitOverride?: string, durationOverride?: number) => {
+    const name = nameOverride || newItemName.trim();
+    if (!name) return;
+    
     const qty = parseFloat(newItemQty) || 1;
-    const duration = parseInt(newItemDuration);
+    const unit = unitOverride || newItemUnit.trim() || 'un';
+    const duration = durationOverride ?? parseInt(newItemDuration);
     
     addMutation.mutate({
-      name: newItemName.trim(),
-      qty: qty,
-      unit: newItemUnit.trim() || 'un',
+      name,
+      qty,
+      unit,
       duration: isNaN(duration) ? undefined : duration
     });
   };
 
   if (isLoading) return <View style={styles.centered}><Text>Carregando lista...</Text></View>;
   if (isError) return <View style={styles.centered}><Text>Erro ao carregar a lista.</Text></View>;
+
+  // Filtra as sugestões para não mostrar itens que já estão na lista de compras
+  const activeSuggestions = suggestions?.filter(sug => 
+    !items?.some(item => item.product_name.toLowerCase() === sug.product_name.toLowerCase())
+  );
 
   return (
     <View style={styles.container}>
@@ -90,41 +109,37 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       <View style={styles.addForm}>
         <TextInput
           style={styles.inputName}
-          placeholder="O que está faltando? (ex: Arroz)"
+          placeholder="O que falta? (ex: Arroz)"
           value={newItemName}
           onChangeText={setNewItemName}
         />
         <View style={styles.row}>
-          <TextInput
-            style={styles.inputSmall}
-            placeholder="Qtd"
-            keyboardType="numeric"
-            value={newItemQty}
-            onChangeText={setNewItemQty}
-          />
-          <TextInput
-            style={styles.inputSmall}
-            placeholder="Unid (kg, un, L)"
-            value={newItemUnit}
-            onChangeText={setNewItemUnit}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={styles.inputMedium}
-            placeholder="Dura aprox. (dias)"
-            keyboardType="numeric"
-            value={newItemDuration}
-            onChangeText={setNewItemDuration}
-          />
-          <TouchableOpacity 
-            style={styles.addButton} 
-            onPress={handleAddItem}
-            disabled={addMutation.isPending}
-          >
+          <TextInput style={styles.inputSmall} placeholder="Qtd" keyboardType="numeric" value={newItemQty} onChangeText={setNewItemQty} />
+          <TextInput style={styles.inputSmall} placeholder="Unid" value={newItemUnit} onChangeText={setNewItemUnit} autoCapitalize="none" />
+          <TextInput style={styles.inputMedium} placeholder="Dura (dias)" keyboardType="numeric" value={newItemDuration} onChangeText={setNewItemDuration} />
+          <TouchableOpacity style={styles.addButton} onPress={() => handleAddItem()} disabled={addMutation.isPending}>
             <Text style={styles.addButtonText}>+</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Carrossel de Sugestões Inteligentes */}
+      {activeSuggestions && activeSuggestions.length > 0 && (
+        <View style={styles.suggestionsContainer}>
+          <Text style={styles.suggestionsTitle}>Talvez precise:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsScroll}>
+            {activeSuggestions.map((sug) => (
+              <TouchableOpacity 
+                key={sug.id} 
+                style={styles.suggestionBadge}
+                onPress={() => handleAddItem(sug.product_name, sug.unit, sug.expected_duration_days)}
+              >
+                <Text style={styles.suggestionText}>+ {sug.product_name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
       
       <FlatList
         data={items}
@@ -141,12 +156,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
             </View>
             
             <View style={styles.actions}>
-              <TextInput
-                style={styles.inputPartial}
-                placeholder="Qtd"
-                keyboardType="numeric"
-                onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))}
-              />
+              <TextInput style={styles.inputPartial} placeholder="Qtd" keyboardType="numeric" onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} />
               <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}>
                 <Text style={styles.btnText}>Parcial</Text>
               </TouchableOpacity>
@@ -168,15 +178,20 @@ const styles = StyleSheet.create({
   backButton: { marginRight: 16, padding: 8 },
   backText: { color: '#2196F3', fontWeight: 'bold', fontSize: 16 },
   title: { fontSize: 24, fontWeight: 'bold' },
-  
-  // Estilos do formulário de inserção
-  addForm: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 16, elevation: 1 },
+  addForm: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 12, elevation: 1 },
   inputName: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 6, marginBottom: 8, backgroundColor: '#fafafa', fontSize: 16 },
   row: { flexDirection: 'row', gap: 8 },
   inputSmall: { flex: 1, borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 6, backgroundColor: '#fafafa' },
   inputMedium: { flex: 1.5, borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 6, backgroundColor: '#fafafa' },
   addButton: { backgroundColor: '#2196F3', width: 45, justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
   addButtonText: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginTop: -2 },
+  
+  // Estilos das Sugestões
+  suggestionsContainer: { marginBottom: 16 },
+  suggestionsTitle: { fontSize: 14, fontWeight: 'bold', color: '#666', marginBottom: 8 },
+  suggestionsScroll: { flexDirection: 'row' },
+  suggestionBadge: { backgroundColor: '#E3F2FD', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#BBDEFB' },
+  suggestionText: { color: '#1976D2', fontWeight: 'bold' },
   
   empty: { textAlign: 'center', color: '#666', marginTop: 40, fontSize: 16 },
   card: { backgroundColor: '#fff', padding: 16, marginBottom: 12, borderRadius: 8, elevation: 1 },
