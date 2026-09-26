@@ -1,4 +1,3 @@
-// src/screens/RecipesScreen.tsx
 import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -7,7 +6,7 @@ import { pantryService } from '../services/pantryService';
 
 interface RecipesScreenProps {
   houseId: string;
-  session: any; // Adicionado para pegarmos o usuário logado
+  session: any; 
 }
 
 export default function RecipesScreen({ houseId, session }: RecipesScreenProps) {
