@@ -27,6 +27,36 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 
   useEffect(() => { aiCheckMutation.mutate(); }, []);
 
+  // 🛠️ FUNÇÃO DE DEBUG MANUAL
+  const handleDebugCheck = () => {
+    if (!items || items.length === 0) {
+      return Alert.alert('Debug Despensa', 'Não há itens na despensa para testar. Adicione algo primeiro.');
+    }
+
+    // Mostra um resumo técnico no telemóvel de todos os itens e as suas durações estimadas
+    const debugInfo = items.map(i => 
+      `- ${i.product_name}: Status [${i.status}] | Duração est. [${i.expected_duration_days || 'Não definida'} dias]`
+    ).join('\n');
+
+    Alert.alert(
+      '🛠️ Relatório de Debug',
+      `Total de itens: ${items.length}\n\n${debugInfo}`,
+      [
+        { 
+          text: 'Forçar Alerta (Testar 1º Item)', 
+          onPress: async () => {
+            const target = items[0];
+            await pantryService.updateItemStatus(target.id, houseId, userId, 'RUNNING_LOW', target.product_name, target.unit);
+            refetch();
+            queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
+            Alert.alert('Sucesso', `Item "${target.product_name}" forçado para o estado "Acabando"! Verifique a aba de Compras.`);
+          } 
+        },
+        { text: 'Fechar', style: 'cancel' }
+      ]
+    );
+  };
+
   const statusMutation = useMutation({
     mutationFn: (params: any) => pantryService.updateItemStatus(params.id, houseId, userId, params.status, params.name, params.unit),
     onSuccess: () => {
@@ -40,13 +70,21 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
     statusMutation.mutate({ id: item.id, name: item.product_name, unit: item.unit, status: newStatus });
   };
 
-  if (isLoading) return <View style={styles.centered}><Text style={styles.loadingText}>Processando Despensa...</Text></View>;
+  if (isLoading) return <View style={styles.centered}><Text style={styles.loadingText}>A processar o inventário...</Text></View>;
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Despensa</Text>
-        <Text style={styles.subtitle}>O que tem atualmente em casa</Text>
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.title}>Inventário</Text>
+          <Text style={styles.subtitle}>O que tem atualmente em casa</Text>
+        </View>
+        
+        {/* Botão de Debug flutuante no Cabeçalho */}
+        <TouchableOpacity style={styles.debugButton} onPress={handleDebugCheck}>
+          <Feather name="tool" size={18} color="#0F766E" />
+          <Text style={styles.debugButtonText}>Debug</Text>
+        </TouchableOpacity>
       </View>
       
       <FlatList
@@ -68,10 +106,13 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
               <View style={styles.cardContent}>
                 <View style={styles.cardInfo}>
                   <Text style={styles.product}>{item.product_name}</Text>
+                  {item.expected_duration_days && (
+                    <Text style={styles.debugSubtext}>Duração configurada: {item.expected_duration_days} dias</Text>
+                  )}
                   <View style={styles.badgeRow}>
                     <View style={[styles.statusBadge, isLow ? styles.badgeLow : styles.badgeOk]}>
                       <Text style={[styles.statusText, isLow ? styles.textLow : styles.textOk]}>
-                        {isLow ? 'Acabando em casa' : 'Boa quantidade'}
+                        {isLow ? 'Acabando' : 'Boa quantidade'}
                       </Text>
                     </View>
                     <Text style={styles.unitText}>{item.unit}</Text>
@@ -103,13 +144,16 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: Platform.OS === 'ios' ? 60 : 40 },
+  container: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: Platform.OS === 'ios' ? 20 : 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
   loadingText: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   
-  header: { paddingHorizontal: 24, marginBottom: 24 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 24, marginBottom: 24 },
   title: { fontSize: 36, fontWeight: '900', color: '#0F172A', letterSpacing: -1.5, marginBottom: 4 },
   subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
+
+  debugButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#CCFBF1', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, gap: 6 },
+  debugButtonText: { color: '#0F766E', fontWeight: '800', fontSize: 13 },
   
   listContainer: { paddingHorizontal: 20, paddingBottom: 40 },
   emptyState: { alignItems: 'center', marginTop: 80 },
@@ -122,7 +166,8 @@ const styles = StyleSheet.create({
   
   cardContent: { flex: 1, padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardInfo: { flex: 1, marginRight: 16 },
-  product: { fontSize: 18, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5, marginBottom: 8 },
+  product: { fontSize: 18, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5, marginBottom: 4 },
+  debugSubtext: { fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 8 },
   
   badgeRow: { flexDirection: 'row', alignItems: 'center' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginRight: 8 },

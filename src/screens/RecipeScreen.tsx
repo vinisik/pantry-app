@@ -56,14 +56,46 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
         const recipeIng = selectedRecipe?.recipe_ingredients?.find(
           (ing: any) => ing.product_name.toLowerCase() === itemName.toLowerCase()
         );
-        const quantity = recipeIng?.quantity || 1;
-        const unit = recipeIng?.unit || 'un';
+        
+        const rawName = itemName.toLowerCase().trim();
+        let quantity = recipeIng?.quantity || 1;
+        let unit = recipeIng?.unit || 'un';
+
+        // Lógica inteligente de embalagens comerciais padrão de mercado
+        if (rawName.includes('sal')) {
+          quantity = 1;
+          unit = 'kg';
+        } else if (rawName.includes('açúcar') || rawName.includes('acucar')) {
+          quantity = 1;
+          unit = 'kg';
+        } else if (rawName.includes('arroz')) {
+          quantity = 5;
+          unit = 'kg';
+        } else if (rawName.includes('óleo') || rawName.includes('oleo') || rawName.includes('azeite')) {
+          quantity = 1;
+          unit = 'un';
+        } else if (rawName.includes('farinha')) {
+          quantity = 1;
+          unit = 'kg';
+        } else if (rawName.includes('leite')) {
+          quantity = 1;
+          unit = 'L';
+        } else if (rawName.includes('manteiga') || rawName.includes('margarina')) {
+          quantity = 1;
+          unit = 'un'; 
+        } else if (rawName.includes('ovo') || rawName.includes('ovos')) {
+          quantity = 6;
+          unit = 'un';
+          quantity = recipeIng?.quantity && recipeIng.quantity < 1 ? 1 : (recipeIng?.quantity || 1);
+          unit = recipeIng?.unit || 'un';
+        }
+
         await shoppingService.addItem(houseId, userId, itemName, quantity, unit, undefined, false);
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
-      Alert.alert('Sucesso!', 'Ingredientes em falta adicionados à lista de compras.');
+      Alert.alert('Sucesso!', 'Ingredientes em falta adicionados à lista de compras com quantidades padrão de mercado.');
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });

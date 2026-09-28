@@ -31,12 +31,13 @@ export const shoppingService = {
   },
 
   // Atualizar quantidade e unidade de um item pendente
-  async updateItem(itemId: string, quantityRequested: number, unit: string) {
+  async updateItem(itemId: string, quantityRequested: number, unit: string, duration?: number) {
     const { error } = await supabase
       .from('shopping_list')
       .update({ 
         quantity_requested: quantityRequested, 
-        unit: unit.trim() || 'un' 
+        unit: unit.trim() || 'un',
+        expected_duration_days: duration || null
       })
       .eq('id', itemId);
 
