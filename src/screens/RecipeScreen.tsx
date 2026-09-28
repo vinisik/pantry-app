@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, ScrollView, Alert, StyleSheet } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, ScrollView, Alert, StyleSheet, Platform } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Feather } from '@expo/vector-icons';
 import { recipeService } from '../services/recipeService';
 import { pantryService } from '../services/pantryService';
 import { aiRecipeService } from '../services/aiRecipeService';
@@ -20,59 +21,33 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   const [exhaustedItems, setExhaustedItems] = useState<string[]>([]);
   const [aiPrompt, setAiPrompt] = useState('');
 
-  const { data: recipes, isLoading: loadingRecipes, isError: isErrorRecipes, error: errorRecipes } = useQuery({
-    queryKey: ['recipes'],
-    queryFn: () => recipeService.getCatalog(),
-  });
-
-  const { data: pantry, isLoading: loadingPantry } = useQuery({
-    queryKey: ['pantry', houseId],
-    queryFn: () => pantryService.getEstimatedPantry(houseId),
-  });
+  const { data: recipes, isLoading: loadingRecipes } = useQuery({ queryKey: ['recipes'], queryFn: () => recipeService.getCatalog() });
+  const { data: pantry, isLoading: loadingPantry } = useQuery({ queryKey: ['pantry', houseId], queryFn: () => pantryService.getEstimatedPantry(houseId) });
 
   const prepMutation = useMutation({
     mutationFn: (recipeName: string) => recipeService.registerPrep(houseId, userId, recipeName),
-    onSuccess: () => {
-      setReviewingRecipe(selectedRecipe);
-      setSelectedRecipe(null);
-      setExhaustedItems([]);
-    },
-    onError: (error: any) => Alert.alert('Erro', error.message)
+    onSuccess: () => { setReviewingRecipe(selectedRecipe); setSelectedRecipe(null); setExhaustedItems([]); }
   });
 
   const generateAiRecipeMutation = useMutation({
     mutationFn: () => aiRecipeService.generateAndSaveRecipe(houseId, pantry || [], aiPrompt),
-    onSuccess: () => {
-      setAiPrompt('');
-      queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      Alert.alert('Sucesso!', 'A IA criou uma receita baseada no seu pedido!');
-    },
-    onError: (error: any) => Alert.alert('Aviso', error.message)
+    onSuccess: () => { setAiPrompt(''); queryClient.invalidateQueries({ queryKey: ['recipes'] }); Alert.alert('Sucesso!', 'A IA criou uma receita!'); }
   });
 
   const deleteRecipeMutation = useMutation({
     mutationFn: (recipeId: string) => recipeService.deleteRecipe(recipeId),
     onSuccess: (_, recipeId) => {
-      queryClient.setQueryData(['recipes'], (old: any) => {
-        if (!old) return [];
-        return old.filter((recipe: any) => recipe.id !== recipeId);
-      });
+      queryClient.setQueryData(['recipes'], (old: any) => old ? old.filter((r: any) => r.id !== recipeId) : []);
       setSelectedRecipe(null);
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['recipes'] });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['recipes'] }),
   });
 
   const confirmDelete = (recipeId: string, recipeTitle: string) => {
-    Alert.alert(
-      'Excluir Receita',
-      `Deseja realmente apagar "${recipeTitle}" do catálogo?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Excluir', style: 'destructive', onPress: () => deleteRecipeMutation.mutate(recipeId) }
-      ]
-    );
+    Alert.alert('Excluir Receita', `Deseja apagar "${recipeTitle}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => deleteRecipeMutation.mutate(recipeId) }
+    ]);
   };
 
   const addMissingToShoppingListMutation = useMutation({
@@ -93,87 +68,81 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
-  const updatePantryMutation = useMutation({
-    mutationFn: async () => {
-      for (const itemName of exhaustedItems) {
-        const pItem = pantry?.find(p => p.product_name.toLowerCase() === itemName.toLowerCase());
-        if (pItem) {
-          await pantryService.updateItemStatus(pItem.id, houseId, userId, 'OUT_OF_STOCK', pItem.product_name, pItem.unit);
-        }
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
-      queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
-      setReviewingRecipe(null);
-      Alert.alert('Pronto!', 'Sua despensa foi atualizada com sucesso.');
-    }
-  });
-
   const toggleExhausted = (itemName: string) => {
     setExhaustedItems(prev => prev.includes(itemName) ? prev.filter(i => i !== itemName) : [...prev, itemName]);
   };
 
-  if (loadingRecipes || loadingPantry) return <View style={styles.centered}><Text style={styles.loadingText}>A consultar cadernos de receitas...</Text></View>;
-  if (isErrorRecipes) return <View style={styles.centered}><Text style={styles.errorText}>Erro: {errorRecipes?.message}</Text></View>;
+  const updatePantryMutation = useMutation({
+    mutationFn: async () => {
+      for (const itemName of exhaustedItems) {
+        const pItem = pantry?.find(p => p.product_name.toLowerCase() === itemName.toLowerCase());
+        if (pItem) await pantryService.updateItemStatus(pItem.id, houseId, userId, 'OUT_OF_STOCK', pItem.product_name, pItem.unit);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pantry', houseId] });
+      setReviewingRecipe(null);
+    }
+  });
+
+  if (loadingRecipes || loadingPantry) return <View style={styles.centered}><Text style={styles.loadingText}>A ler os cadernos...</Text></View>;
 
   const processedRecipes = recipes?.map((recipe: any) => {
     const missingIngredients: string[] = [];
     if (recipe.recipe_ingredients) {
       recipe.recipe_ingredients.forEach((ing: any) => {
-        const hasItem = pantry?.some(p => p.product_name.toLowerCase() === ing.product_name.toLowerCase());
-        if (!hasItem) missingIngredients.push(ing.product_name);
+        if (!pantry?.some(p => p.product_name.toLowerCase() === ing.product_name.toLowerCase())) missingIngredients.push(ing.product_name);
       });
     }
     return { ...recipe, missingIngredients };
-  });
+  })?.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length);
 
-  processedRecipes?.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length);
-
-  // REVISÃO PÓS-PREPARO
+  // Vista de Revisão Pós-Preparo
   if (reviewingRecipe) {
     return (
       <View style={styles.container}>
-        <Text style={styles.detailTitle}>Bom Apetite! 🍽️</Text>
-        <Text style={styles.subtitle}>Algum destes ingredientes acabou durante o preparo?</Text>
-        <ScrollView style={styles.ingredientsBox} contentContainerStyle={{ paddingBottom: 20 }}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Bom Apetite!</Text>
+          <Text style={styles.subtitle}>Algum destes ingredientes acabou durante o preparo?</Text>
+        </View>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 20 }}>
           {reviewingRecipe.recipe_ingredients.map((ing: any) => {
             if (reviewingRecipe.missingIngredients.includes(ing.product_name)) return null;
             const isSelected = exhaustedItems.includes(ing.product_name);
             return (
               <TouchableOpacity key={ing.id} style={[styles.reviewItem, isSelected && styles.reviewItemSelected]} onPress={() => toggleExhausted(ing.product_name)}>
                 <Text style={[styles.reviewItemText, isSelected && styles.reviewItemTextSelected]}>{ing.product_name}</Text>
-                {isSelected && <Text style={styles.checkIcon}>✓ Acabou</Text>}
+                {isSelected && <Feather name="check-circle" size={24} color="#EF4444" />}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
-        <TouchableOpacity style={styles.btnCook} onPress={() => updatePantryMutation.mutate()} disabled={updatePantryMutation.isPending}>
-          <Text style={styles.btnCookText}>{exhaustedItems.length > 0 ? 'Atualizar Despensa' : 'Sobrou tudo (Concluir)'}</Text>
+        <TouchableOpacity style={styles.btnCookFinal} onPress={() => updatePantryMutation.mutate()}>
+          <Text style={styles.btnCookTextFinal}>{exhaustedItems.length > 0 ? 'Atualizar Despensa' : 'Sobrou tudo (Concluir)'}</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // DETALHES DA RECEITA
+  // Detalhes da Receita
   if (selectedRecipe) {
     return (
       <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => setSelectedRecipe(null)} style={styles.backButton}>
-            <Text style={styles.backText}>{"< Voltar"}</Text>
+        <View style={styles.detailNav}>
+          <TouchableOpacity onPress={() => setSelectedRecipe(null)} style={styles.backBtn}>
+            <Feather name="arrow-left" size={24} color="#0F172A" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => confirmDelete(selectedRecipe.id, selectedRecipe.title)} style={styles.deleteHeaderButton}>
-            <Text style={styles.deleteHeaderText}>Excluir Receita</Text>
+          <TouchableOpacity onPress={() => confirmDelete(selectedRecipe.id, selectedRecipe.title)} style={styles.deleteBtn}>
+            <Feather name="trash-2" size={20} color="#EF4444" />
           </TouchableOpacity>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 24 }}>
           <Text style={styles.detailTitle}>{selectedRecipe.title}</Text>
           
           <View style={styles.infoRow}>
-            <Text style={styles.infoBadge}>⏱ {selectedRecipe.prep_time_minutes} min</Text>
-            <Text style={styles.infoBadge}>🍽 {selectedRecipe.servings} porções</Text>
+            <View style={styles.infoBadge}><Feather name="clock" size={16} color="#0F766E" /><Text style={styles.infoBadgeText}>{selectedRecipe.prep_time_minutes} min</Text></View>
+            <View style={styles.infoBadge}><Feather name="users" size={16} color="#0F766E" /><Text style={styles.infoBadgeText}>{selectedRecipe.servings} porções</Text></View>
           </View>
 
           <Text style={styles.sectionTitle}>Ingredientes</Text>
@@ -181,60 +150,60 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
             {selectedRecipe.recipe_ingredients.map((ing: any) => {
               const isMissing = selectedRecipe.missingIngredients.includes(ing.product_name);
               return (
-                <Text key={ing.id} style={[styles.ingredientText, isMissing && styles.ingredientMissing]}>
-                  • {ing.quantity} {ing.unit} de {ing.product_name} {isMissing ? '(Falta em casa)' : ''}
-                </Text>
+                <View key={ing.id} style={styles.ingredientRow}>
+                  <View style={[styles.bullet, isMissing && styles.bulletMissing]} />
+                  <Text style={[styles.ingredientText, isMissing && styles.ingredientMissing]}>
+                    {ing.quantity} {ing.unit} {ing.product_name}
+                  </Text>
+                </View>
               );
             })}
           </View>
 
+          {/* Botão de Adicionar Faltas à Lista */}
           {selectedRecipe.missingIngredients && selectedRecipe.missingIngredients.length > 0 && (
             <TouchableOpacity 
-              style={styles.btnAddToCart} 
+              style={styles.btnAddMissing} 
               onPress={() => addMissingToShoppingListMutation.mutate(selectedRecipe.missingIngredients)}
               disabled={addMissingToShoppingListMutation.isPending}
             >
-              <Text style={styles.btnAddToCartText}>
-                {addMissingToShoppingListMutation.isPending ? 'Adicionando...' : '🛒 Adicionar Faltas à Lista de Compras'}
+              <Feather name="shopping-cart" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.btnAddMissingText}>
+                {addMissingToShoppingListMutation.isPending ? 'Adicionando...' : 'Adicionar faltas à lista de compras'}
               </Text>
             </TouchableOpacity>
           )}
 
-          <Text style={styles.sectionTitle}>Modo de Preparo</Text>
-          <Text style={styles.instructions}>{selectedRecipe.instructions}</Text>
-
-          <TouchableOpacity style={styles.btnCook} onPress={() => prepMutation.mutate(selectedRecipe.title)} disabled={prepMutation.isPending}>
-            <Text style={styles.btnCookText}>Cozinhei isso! ✨</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Preparação</Text>
+          <View style={styles.instructionsBox}>
+            <Text style={styles.instructions}>{selectedRecipe.instructions}</Text>
+          </View>
         </ScrollView>
+
+        <View style={styles.bottomBar}>
+          <TouchableOpacity style={styles.btnCookPrimary} onPress={() => prepMutation.mutate(selectedRecipe.title)}>
+            <Text style={styles.btnCookTextPrimary}>Cozinhar isso!</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
-  // LISTA DE RECEITAS
+  // Lista de Receitas Principal
   return (
     <View style={styles.container}>
-      <View style={styles.headerContainer}>
-        <Text style={styles.title}>🍳 Inspiração Culinária</Text>
-        <Text style={styles.subtitle}>Receitas baseadas na sua despensa atual</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Receitas</Text>
+        <Text style={styles.subtitle}>O que fazer com o que tem em casa</Text>
       </View>
 
       <View style={styles.aiCard}>
-        <TextInput 
-          style={styles.aiInput} 
-          placeholder="O que deseja cozinhar? (ex: Almoço com frango)" 
-          placeholderTextColor="#A0A0A0"
-          value={aiPrompt} 
-          onChangeText={setAiPrompt} 
-        />
-        <TouchableOpacity 
-          style={styles.aiButton} 
-          onPress={() => generateAiRecipeMutation.mutate()}
-          disabled={generateAiRecipeMutation.isPending}
-        >
-          <Text style={styles.aiButtonText}>
-            {generateAiRecipeMutation.isPending ? 'Criando prato com IA...' : '✨ Inventar receita com o que tenho!'}
-          </Text>
+        <View style={styles.aiInputWrapper}>
+          <Feather name="cpu" size={20} color="#6366F1" />
+          <TextInput style={styles.aiInput} placeholder="Ex: Almoço com frango" placeholderTextColor="#94A3B8" value={aiPrompt} onChangeText={setAiPrompt} />
+        </View>
+        <TouchableOpacity style={styles.aiButton} onPress={() => generateAiRecipeMutation.mutate()} disabled={generateAiRecipeMutation.isPending}>
+          <Text style={styles.aiButtonText}>{generateAiRecipeMutation.isPending ? 'A gerar...' : 'Criar prato com IA'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -242,32 +211,22 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
         data={processedRecipes}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={<Text style={styles.empty}>Nenhuma receita encontrada no catálogo.</Text>}
+        ListEmptyComponent={<Text style={styles.emptyText}>Nenhuma receita no catálogo.</Text>}
         renderItem={({ item }) => {
-          const missCount = item.missingIngredients.length;
-          const isReady = missCount === 0;
+          const isReady = item.missingIngredients.length === 0;
           return (
-            <View style={[styles.card, isReady ? styles.cardReady : styles.cardMissing]}>
-              <View style={styles.cardHeader}>
+            <TouchableOpacity style={styles.recipeCard} onPress={() => setSelectedRecipe(item)} activeOpacity={0.8}>
+              <View style={styles.recipeCardHeader}>
                 <Text style={styles.recipeTitle}>{item.title}</Text>
-                <Text style={styles.timeText}>⏱ {item.prep_time_minutes} min</Text>
+                <View style={styles.timeBadge}><Text style={styles.timeText}>{item.prep_time_minutes}m</Text></View>
               </View>
               
-              {isReady ? (
-                <Text style={styles.statusReady}>✨ Dá para fazer agora com o que tem!</Text>
-              ) : (
-                <Text style={styles.statusMissing}>⚠️ Faltam {missCount}: {item.missingIngredients.join(', ')}</Text>
-              )}
-              
-              <View style={styles.cardActionsRow}>
-                <TouchableOpacity style={styles.btnOpen} onPress={() => setSelectedRecipe(item)}>
-                  <Text style={styles.btnOpenText}>Ver Receita</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnCardDelete} onPress={() => confirmDelete(item.id, item.title)}>
-                  <Text style={styles.btnCardDeleteText}>✕</Text>
-                </TouchableOpacity>
+              <View style={[styles.statusBadge, isReady ? styles.badgeReady : styles.badgeMissing]}>
+                <Text style={[styles.statusText, isReady ? styles.textReady : styles.textMissing]}>
+                  {isReady ? 'Pode fazer agora' : `Faltam ${item.missingIngredients.length} ingredientes`}
+                </Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         }}
       />
@@ -276,62 +235,66 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA', paddingTop: 50 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
-  loadingText: { color: '#6C757D', fontSize: 15, fontWeight: '500' },
-  errorText: { color: '#D32F2F', fontWeight: 'bold' },
-  headerContainer: { paddingHorizontal: 20, marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: '700', color: '#1C1C1E' },
-  subtitle: { color: '#6C757D', marginTop: 2, fontSize: 14 },
-  empty: { textAlign: 'center', color: '#8E8E93', marginTop: 40, fontStyle: 'italic', fontSize: 14 },
+  container: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: Platform.OS === 'ios' ? 20 : 40 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
+  loadingText: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   
-  aiCard: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 14, borderRadius: 14, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  aiInput: { borderWidth: 1, borderColor: '#E5E5EA', padding: 11, borderRadius: 10, backgroundColor: '#FAFAFC', marginBottom: 10, fontSize: 14, color: '#1C1C1E' },
-  aiButton: { backgroundColor: '#7B1FA2', padding: 12, borderRadius: 10, alignItems: 'center', shadowColor: '#7B1FA2', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 2 },
-  aiButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  header: { paddingHorizontal: 24, marginBottom: 20 },
+  title: { fontSize: 36, fontWeight: '900', color: '#0F172A', letterSpacing: -1.5, marginBottom: 4 },
+  subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
+  
+  aiCard: { backgroundColor: '#EEF2FF', marginHorizontal: 20, padding: 20, borderRadius: 24, marginBottom: 20 },
+  aiInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, marginBottom: 16 },
+  aiInput: { flex: 1, paddingVertical: 16, paddingLeft: 12, fontSize: 16, color: '#0F172A', fontWeight: '500' },
+  aiButton: { backgroundColor: '#4F46E5', padding: 16, borderRadius: 16, alignItems: 'center' },
+  aiButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
 
-  listContainer: { paddingHorizontal: 20, paddingBottom: 20 },
-  card: { backgroundColor: '#FFFFFF', padding: 16, marginBottom: 14, borderRadius: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, borderLeftWidth: 4 },
-  cardReady: { borderLeftColor: '#2E7D32' },
-  cardMissing: { borderLeftColor: '#F57C00' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  recipeTitle: { fontSize: 17, fontWeight: '700', flex: 1, color: '#1C1C1E', marginRight: 8 },
-  timeText: { fontSize: 13, color: '#6C757D', fontWeight: '600' },
-  statusReady: { color: '#2E7D32', fontWeight: '600', fontSize: 13, marginBottom: 12 },
-  statusMissing: { color: '#F57C00', fontSize: 13, marginBottom: 12, fontWeight: '500' },
+  listContainer: { paddingHorizontal: 20, paddingBottom: 40 },
+  emptyText: { textAlign: 'center', color: '#94A3B8', fontSize: 16, marginTop: 40 },
   
-  cardActionsRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  btnOpen: { backgroundColor: '#F1F3F5', padding: 10, borderRadius: 10, alignItems: 'center', flex: 1 },
-  btnOpenText: { color: '#1C1C1E', fontWeight: '600', fontSize: 13 },
-  btnCardDelete: { backgroundColor: '#FFEBEE', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  btnCardDeleteText: { color: '#C62828', fontWeight: 'bold', fontSize: 15 },
+  recipeCard: { backgroundColor: '#FFFFFF', padding: 24, marginBottom: 16, borderRadius: 24, shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+  recipeCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  recipeTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', flex: 1, marginRight: 12, letterSpacing: -0.5 },
+  timeBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  timeText: { color: '#64748B', fontWeight: '800', fontSize: 14 },
+  statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  badgeReady: { backgroundColor: '#D1FAE5' },
+  badgeMissing: { backgroundColor: '#FEF3C7' },
+  statusText: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
+  textReady: { color: '#047857' },
+  textMissing: { color: '#B45309' },
+
+  detailNav: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 16 },
+  backBtn: { width: 44, height: 44, backgroundColor: '#FFFFFF', borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 },
+  deleteBtn: { width: 44, height: 44, backgroundColor: '#FEE2E2', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 20 },
-  backButton: { paddingVertical: 8, paddingRight: 16 },
-  backText: { color: '#2E7D32', fontWeight: '600', fontSize: 15 },
-  deleteHeaderButton: { backgroundColor: '#FFEBEE', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  deleteHeaderText: { color: '#C62828', fontWeight: '600', fontSize: 13 },
+  detailTitle: { fontSize: 32, fontWeight: '900', color: '#0F172A', letterSpacing: -1, marginBottom: 20 },
+  infoRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  infoBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#CCFBF1', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 16 },
+  infoBadgeText: { color: '#0F766E', fontWeight: '800', fontSize: 15, marginLeft: 8 },
   
-  detailTitle: { fontSize: 24, fontWeight: '700', color: '#1C1C1E', marginBottom: 12, paddingHorizontal: 20 },
-  infoRow: { flexDirection: 'row', gap: 8, marginBottom: 20, paddingHorizontal: 20 },
-  infoBadge: { backgroundColor: '#E8F5E9', color: '#2E7D32', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, fontWeight: '600', fontSize: 13 },
+  sectionTitle: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 16, letterSpacing: -0.5 },
+  ingredientsBox: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 24, marginBottom: 16, shadowColor: '#94A3B8', shadowOpacity: 0.05, shadowRadius: 10 },
+  ingredientRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  bullet: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0F766E', marginRight: 12 },
+  bulletMissing: { backgroundColor: '#EF4444' },
+  ingredientText: { fontSize: 16, color: '#334155', fontWeight: '500' },
+  ingredientMissing: { color: '#EF4444', textDecorationLine: 'line-through' },
+
+  btnAddMissing: { flexDirection: 'row', backgroundColor: '#D97706', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24, shadowColor: '#94A3B8', shadowOpacity: 0.1, shadowRadius: 8 },
+  btnAddMissingText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   
-  sectionTitle: { fontSize: 18, fontWeight: '700', marginTop: 10, marginBottom: 10, color: '#1C1C1E', paddingHorizontal: 20 },
-  ingredientsBox: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 16, borderRadius: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, marginBottom: 20 },
-  ingredientText: { fontSize: 15, color: '#495057', marginBottom: 6, lineHeight: 20 },
-  ingredientMissing: { color: '#C62828', textDecorationLine: 'line-through', fontWeight: '500' },
+  instructionsBox: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 24, marginBottom: 40, shadowColor: '#94A3B8', shadowOpacity: 0.05, shadowRadius: 10 },
+  instructions: { fontSize: 16, color: '#334155', lineHeight: 28, fontWeight: '500' },
   
-  instructions: { fontSize: 15, color: '#495057', lineHeight: 22, backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 16, borderRadius: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2, marginBottom: 24 },
-  
-  btnCook: { backgroundColor: '#2E7D32', marginHorizontal: 20, padding: 14, borderRadius: 12, alignItems: 'center', marginBottom: 20, shadowColor: '#2E7D32', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
-  btnCookText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  
-  reviewItem: { padding: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5EA', borderRadius: 12, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  reviewItemSelected: { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' },
-  reviewItemText: { fontSize: 15, color: '#1C1C1E' },
-  reviewItemTextSelected: { color: '#C62828', fontWeight: '600' },
-  checkIcon: { color: '#C62828', fontWeight: 'bold' },
-  
-  btnAddToCart: { backgroundColor: '#F57C00', marginHorizontal: 20, padding: 14, borderRadius: 12, alignItems: 'center', marginBottom: 20, shadowColor: '#F57C00', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 2 },
-  btnAddToCartText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  bottomBar: { padding: 20, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  btnCookPrimary: { backgroundColor: '#0F766E', padding: 20, borderRadius: 20, alignItems: 'center' },
+  btnCookTextPrimary: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+
+  reviewItem: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9' },
+  reviewItemSelected: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
+  reviewItemText: { fontSize: 16, color: '#334155', fontWeight: '600' },
+  reviewItemTextSelected: { color: '#EF4444', fontWeight: '800' },
+  btnCookFinal: { backgroundColor: '#0F172A', margin: 20, padding: 20, borderRadius: 20, alignItems: 'center' },
+  btnCookTextFinal: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
 });

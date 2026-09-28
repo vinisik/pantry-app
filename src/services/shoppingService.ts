@@ -30,8 +30,20 @@ export const shoppingService = {
     if (error) throw new Error(`Erro ao adicionar item à lista: ${error.message}`);
   },
 
+  // Atualizar quantidade e unidade de um item pendente
+  async updateItem(itemId: string, quantityRequested: number, unit: string) {
+    const { error } = await supabase
+      .from('shopping_list')
+      .update({ 
+        quantity_requested: quantityRequested, 
+        unit: unit.trim() || 'un' 
+      })
+      .eq('id', itemId);
+
+    if (error) throw new Error(`Erro ao atualizar item: ${error.message}`);
+  },
+
   async confirmPurchase(params: { itemId: string, houseId: string, userId: string, productName: string, quantityRequested: number, quantityBoughtNow: number, unit: string }) {
-    // 1. Busca o item atual na lista de compras
     const { data: current } = await supabase
       .from('shopping_list')
       .select('quantity_bought, quantity_requested')
@@ -43,14 +55,11 @@ export const shoppingService = {
     const newBought = current.quantity_bought + params.quantityBoughtNow;
 
     if (newBought >= current.quantity_requested) {
-      // Se comprou tudo, remove da lista de compras
       await supabase.from('shopping_list').delete().eq('id', params.itemId);
     } else {
-      // Se comprou parcialmente, atualiza o progresso
       await supabase.from('shopping_list').update({ quantity_bought: newBought }).eq('id', params.itemId);
     }
 
-    // 2. Procura primeiro se o produto já existe na tabela pantry_items (mesmo que estivesse esgotado)
     const { data: existingPantryItem } = await supabase
       .from('pantry_items')
       .select('id')
@@ -60,7 +69,6 @@ export const shoppingService = {
 
     const pantryIdToUpdate = existingPantryItem ? existingPantryItem.id : 'new';
 
-    // 3. Atualiza ou insere na despensa alterando o estado para AVAILABLE
     await pantryService.updateItemStatus(
       pantryIdToUpdate, 
       params.houseId, 

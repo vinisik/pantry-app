@@ -1,133 +1,110 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, ScrollView, Clipboard } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, ScrollView, Clipboard, Platform } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Feather } from '@expo/vector-icons';
 import { houseService } from '../services/houseService';
 
-interface ResidenceProfileScreenProps {
-  houseId: string;
-}
+interface ResidenceProfileScreenProps { houseId: string; }
 
 export default function ResidenceProfileScreen({ houseId }: ResidenceProfileScreenProps) {
   const queryClient = useQueryClient();
   const [newValue, setNewValue] = useState('');
   const [type, setType] = useState<'RESTRICTION' | 'PREFERENCE'>('RESTRICTION');
 
-  const { data: preferences, isLoading, isError } = useQuery({
-    queryKey: ['housePreferences', houseId],
-    queryFn: () => houseService.getHousePreferences(houseId),
-  });
-
-  const { data: participants } = useQuery({
-    queryKey: ['houseParticipants', houseId],
-    queryFn: () => houseService.getHouseParticipants(houseId),
-  });
+  const { data: preferences, isLoading, isError } = useQuery({ queryKey: ['housePreferences', houseId], queryFn: () => houseService.getHousePreferences(houseId) });
+  const { data: participants } = useQuery({ queryKey: ['houseParticipants', houseId], queryFn: () => houseService.getHouseParticipants(houseId) });
 
   const addMutation = useMutation({
     mutationFn: () => houseService.addPreference(houseId, type, newValue.trim()),
-    onSuccess: () => {
-      setNewValue('');
-      queryClient.invalidateQueries({ queryKey: ['housePreferences', houseId] });
-    },
+    onSuccess: () => { setNewValue(''); queryClient.invalidateQueries({ queryKey: ['housePreferences', houseId] }); },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
   const deleteMutation = useMutation({
     mutationFn: (prefId: string) => houseService.removePreference(prefId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['housePreferences', houseId] }),
-    onError: (error: any) => Alert.alert('Erro', error.message)
   });
-
-  const handleAdd = () => {
-    if (!newValue.trim()) return;
-    addMutation.mutate();
-  };
 
   if (isLoading) return <View style={styles.centered}><Text style={styles.loadingText}>Carregando perfil...</Text></View>;
   if (isError) return <View style={styles.centered}><Text style={styles.errorText}>Erro ao carregar dados.</Text></View>;
 
-  const copyToClipboard = () => {
-    Clipboard.setString(houseId);
-    Alert.alert('Sucesso!', 'Código da residência copiado.');
-  };
+  const copyToClipboard = () => { Clipboard.setString(houseId); Alert.alert('Sucesso!', 'Código da residência copiado.'); };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* Bloco de Convite */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Perfil da Residência</Text>
+        <Text style={styles.subtitle}>Gerencie regras, restrições e moradores</Text>
+      </View>
+
       <View style={styles.inviteCard}>
-        <Text style={styles.label}>🏠 Convidar Moradores</Text>
-        <Text style={styles.subtext}>Compartilhe este código com quem deseja adicionar à residência:</Text>
+        <View style={styles.inviteHeader}>
+          <Feather name="users" size={20} color="#0F766E" />
+          <Text style={styles.inviteLabel}>Convidar Moradores</Text>
+        </View>
+        <Text style={styles.subtext}>Compartilhe este código com quem deseja juntar à residência:</Text>
         <View style={styles.codeRow}>
           <Text style={styles.codeText} numberOfLines={1}>{houseId}</Text>
           <TouchableOpacity style={styles.copyButton} onPress={copyToClipboard}>
+            <Feather name="copy" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
             <Text style={styles.copyButtonText}>Copiar</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      <Text style={styles.title}>Perfil da Residência</Text>
-      <Text style={styles.subtitle}>Gerencie regras e preferências alimentares da casa.</Text>
-
-      {/* Formulário para Adicionar Regra */}
       <View style={styles.formCard}>
-        <Text style={styles.label}>Adicionar Nova Regra</Text>
+        <Text style={styles.sectionTitle}>Adicionar Nova Regra</Text>
         
         <View style={styles.typeSelector}>
-          <TouchableOpacity 
-            style={[styles.typeButton, type === 'RESTRICTION' && styles.activeRestriction]} 
-            onPress={() => setType('RESTRICTION')}
-          >
-            <Text style={[styles.typeText, type === 'RESTRICTION' && styles.activeRestrictionText]}>🚫 Restrição</Text>
+          <TouchableOpacity style={[styles.typeButton, type === 'RESTRICTION' && styles.activeRestriction]} onPress={() => setType('RESTRICTION')}>
+            <Text style={[styles.typeText, type === 'RESTRICTION' && styles.activeRestrictionText]}>Restrição</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[styles.typeButton, type === 'PREFERENCE' && styles.activePreference]} 
-            onPress={() => setType('PREFERENCE')}
-          >
-            <Text style={[styles.typeText, type === 'PREFERENCE' && styles.activePreferenceText]}>⭐ Preferência</Text>
+          <TouchableOpacity style={[styles.typeButton, type === 'PREFERENCE' && styles.activePreference]} onPress={() => setType('PREFERENCE')}>
+            <Text style={[styles.typeText, type === 'PREFERENCE' && styles.activePreferenceText]}>Preferência</Text>
           </TouchableOpacity>
         </View>
 
-        <TextInput 
-          style={styles.input} 
-          placeholder="Ex: Sem Glúten, Vegano, Alergia a amendoim..." 
-          placeholderTextColor="#A0A0A0"
-          value={newValue} 
-          onChangeText={setNewValue} 
-        />
+        <View style={styles.inputWrapper}>
+          <Feather name="tag" size={18} color="#94A3B8" style={styles.inputIcon} />
+          <TextInput style={styles.input} placeholder="Ex: Sem glúten, Vegano..." placeholderTextColor="#94A3B8" value={newValue} onChangeText={setNewValue} />
+        </View>
 
-        <TouchableOpacity style={styles.addButton} onPress={handleAdd} disabled={addMutation.isPending}>
-          <Text style={styles.addButtonText}>Adicionar à Residência</Text>
+        <TouchableOpacity style={styles.addButton} onPress={() => newValue.trim() && addMutation.mutate()} disabled={addMutation.isPending}>
+          <Text style={styles.addButtonText}>Adicionar Regra</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Lista de Restrições e Preferências Atuais */}
       <Text style={styles.sectionTitle}>Regras Ativas</Text>
       {preferences && preferences.length === 0 ? (
-        <Text style={styles.empty}>Nenhuma restrição ou preferência cadastrada.</Text>
+        <Text style={styles.empty}>Nenhuma restrição ou preferência registada.</Text>
       ) : (
         preferences?.map((pref: any) => (
           <View key={pref.id} style={styles.prefCard}>
             <View style={{ flex: 1 }}>
               <Text style={styles.prefValue}>{pref.value}</Text>
               <Text style={[styles.prefType, pref.type === 'RESTRICTION' ? styles.textRestriction : styles.textPreference]}>
-                {pref.type === 'RESTRICTION' ? 'Restrição Obrigatória' : 'Preferência da Casa'}
+                {pref.type === 'RESTRICTION' ? 'Restrição Obrigatória' : 'Preferência da Residência'}
               </Text>
             </View>
             <TouchableOpacity style={styles.deleteButton} onPress={() => deleteMutation.mutate(pref.id)}>
-              <Text style={styles.deleteButtonText}>✕</Text>
+              <Feather name="trash-2" size={18} color="#EF4444" />
             </TouchableOpacity>
           </View>
         ))
       )}
 
-      {/* Lista de Membros da Casa */}
-      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Membros da Residência</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Membros</Text>
       {participants?.map((member: any) => (
         <View key={member.user_id} style={styles.memberCard}>
-          <Text style={styles.memberText}>Membro: {member.user_id.substring(0, 8)}...</Text>
-          <Text style={[styles.memberRole, member.role === 'ADMIN' ? styles.roleAdmin : styles.roleMember]}>
-            {member.role === 'ADMIN' ? '👑 Admin' : '🏠 Morador'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Feather name="user" size={18} color="#64748B" style={{ marginRight: 12 }} />
+            <Text style={styles.memberText}>{member.user_id.substring(0, 10)}...</Text>
+          </View>
+          <View style={[styles.memberRole, member.role === 'ADMIN' ? styles.roleAdmin : styles.roleMember]}>
+            <Text style={[styles.memberRoleText, member.role === 'ADMIN' ? styles.roleAdminText : styles.roleMemberText]}>
+              {member.role === 'ADMIN' ? 'Administrador' : 'Morador'}
+            </Text>
+          </View>
         </View>
       ))}
     </ScrollView>
@@ -135,43 +112,58 @@ export default function ResidenceProfileScreen({ houseId }: ResidenceProfileScre
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 30 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' },
-  loadingText: { color: '#6C757D', fontSize: 15, fontWeight: '500' },
-  errorText: { color: '#D32F2F', fontSize: 15, fontWeight: '500' },
-  title: { fontSize: 24, fontWeight: '700', color: '#1C1C1E' },
-  subtitle: { color: '#6C757D', marginBottom: 20, marginTop: 2, fontSize: 14 },
-  formCard: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 14, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  label: { fontSize: 14, fontWeight: '600', marginBottom: 8, color: '#1C1C1E' },
-  typeSelector: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  typeButton: { flex: 1, padding: 10, borderWidth: 1, borderColor: '#E5E5EA', borderRadius: 10, alignItems: 'center', backgroundColor: '#FAFAFC' },
-  activeRestriction: { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' },
-  activePreference: { backgroundColor: '#FFF9C4', borderColor: '#FFF59D' },
-  typeText: { fontSize: 13, color: '#6C757D', fontWeight: '600' },
-  activeRestrictionText: { color: '#C62828' },
-  activePreferenceText: { color: '#F57F17' },
-  input: { borderWidth: 1, borderColor: '#E5E5EA', padding: 12, borderRadius: 10, backgroundColor: '#FAFAFC', marginBottom: 12, fontSize: 15, color: '#1C1C1E' },
-  addButton: { backgroundColor: '#2E7D32', padding: 14, borderRadius: 10, alignItems: 'center' },
-  addButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12, color: '#1C1C1E' },
-  empty: { color: '#8E8E93', fontStyle: 'italic', marginBottom: 20, fontSize: 14 },
-  prefCard: { backgroundColor: '#FFFFFF', padding: 14, borderRadius: 12, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
-  prefValue: { fontSize: 16, fontWeight: '600', color: '#1C1C1E' },
-  prefType: { fontSize: 12, marginTop: 3, fontWeight: '500' },
-  textRestriction: { color: '#C62828' },
-  textPreference: { color: '#F57F17' },
-  deleteButton: { backgroundColor: '#FFEBEE', width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-  deleteButtonText: { color: '#C62828', fontWeight: 'bold' },
-  memberCard: { backgroundColor: '#FFFFFF', padding: 14, borderRadius: 12, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
-  memberText: { color: '#495057', fontSize: 14 },
-  memberRole: { fontWeight: '600', fontSize: 12, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  roleAdmin: { backgroundColor: '#E3F2FD', color: '#1976D2' },
-  roleMember: { backgroundColor: '#F1F3F5', color: '#495057' },
-  inviteCard: { backgroundColor: '#E8F5E9', padding: 16, borderRadius: 14, marginBottom: 20, borderWidth: 1, borderColor: '#C8E6C9' },
-  subtext: { color: '#495057', fontSize: 13, marginBottom: 10, lineHeight: 18 },
-  codeRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#A5D6A7', alignItems: 'center', paddingLeft: 12 },
-  codeText: { flex: 1, color: '#2E7D32', fontWeight: '700', fontSize: 14 },
-  copyButton: { backgroundColor: '#2E7D32', paddingVertical: 12, paddingHorizontal: 18, borderTopRightRadius: 9, borderBottomRightRadius: 9 },
-  copyButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 }
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  scrollContent: { padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 40 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
+  loadingText: { color: '#64748B', fontSize: 16, fontWeight: '500' },
+  errorText: { color: '#EF4444', fontSize: 16, fontWeight: '500' },
+  
+  header: { marginBottom: 24 },
+  title: { fontSize: 36, fontWeight: '900', color: '#0F172A', letterSpacing: -1.5, marginBottom: 4 },
+  subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
+
+  formCard: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 24, marginBottom: 24, shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+  sectionTitle: { fontSize: 20, fontWeight: '800', marginBottom: 16, color: '#0F172A', letterSpacing: -0.5 },
+  
+  typeSelector: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  typeButton: { flex: 1, padding: 14, borderWidth: 1.5, borderColor: '#F1F5F9', borderRadius: 16, alignItems: 'center', backgroundColor: '#F8FAFC' },
+  activeRestriction: { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' },
+  activePreference: { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
+  typeText: { fontSize: 14, color: '#64748B', fontWeight: '700' },
+  activeRestrictionText: { color: '#991B1B' },
+  activePreferenceText: { color: '#B45309' },
+  
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 16, marginBottom: 16 },
+  inputIcon: { paddingLeft: 16 },
+  input: { flex: 1, padding: 16, fontSize: 16, color: '#0F172A', fontWeight: '500' },
+  
+  addButton: { backgroundColor: '#0F766E', padding: 18, borderRadius: 16, alignItems: 'center' },
+  addButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+  
+  empty: { color: '#94A3B8', fontStyle: 'italic', fontSize: 15, marginBottom: 20 },
+  
+  prefCard: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  prefValue: { fontSize: 17, fontWeight: '800', color: '#0F172A', letterSpacing: -0.3 },
+  prefType: { fontSize: 13, marginTop: 4, fontWeight: '700' },
+  textRestriction: { color: '#EF4444' },
+  textPreference: { color: '#D97706' },
+  deleteButton: { backgroundColor: '#FEE2E2', padding: 12, borderRadius: 14 },
+  
+  memberCard: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  memberText: { color: '#334155', fontSize: 16, fontWeight: '700' },
+  memberRole: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
+  roleAdmin: { backgroundColor: '#CCFBF1' },
+  roleMember: { backgroundColor: '#F1F5F9' },
+  memberRoleText: { fontWeight: '800', fontSize: 12, textTransform: 'uppercase' },
+  roleAdminText: { color: '#0F766E' },
+  roleMemberText: { color: '#64748B' },
+  
+  inviteCard: { backgroundColor: '#CCFBF1', padding: 20, borderRadius: 24, marginBottom: 24 },
+  inviteHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  inviteLabel: { fontSize: 16, fontWeight: '800', color: '#0F766E', marginLeft: 10 },
+  subtext: { color: '#334155', fontSize: 14, marginBottom: 16, lineHeight: 20, fontWeight: '500' },
+  codeRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 16, alignItems: 'center', paddingLeft: 16, overflow: 'hidden' },
+  codeText: { flex: 1, color: '#0F766E', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
+  copyButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0F766E', paddingVertical: 16, paddingHorizontal: 20 },
+  copyButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 }
 });

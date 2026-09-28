@@ -1,6 +1,7 @@
 // App.tsx
 import React, { useState, useEffect } from 'react';
-import { SafeAreaView, View, Text } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { supabase } from './src/lib/supabase';

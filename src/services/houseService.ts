@@ -8,7 +8,7 @@ export const houseService = {
       .select('id, name, resident_count')
       .single();
 
-    if (houseError || !house) throw new Error(`Erro ao criar casa: ${houseError?.message}`);
+    if (houseError || !house) throw new Error(`Erro ao criar Residência: ${houseError?.message}`);
 
     const { error: participantError } = await supabase
       .from('house_participants')
@@ -29,7 +29,7 @@ export const houseService = {
     
     return data.map((d: any) => ({ 
       id: d.house_id, 
-      name: d.houses?.name || 'Casa Desconhecida',
+      name: d.houses?.name || 'Residência Desconhecida',
       residentCount: d.houses?.resident_count || 1
     }));
   },
@@ -100,7 +100,7 @@ export const houseService = {
     if (error) throw new Error(`Erro ao atualizar papel: ${error.message}`);
   },
 
-  // Permite a um user juntar-se a uma casa existente através do ID
+  // Permite a um user juntar-se a uma Residência existente através do ID
   async joinHouse(houseId: string, userId: string) {
     // Verifica se a casa realmente existe
     const { data: house, error: houseError } = await supabase
@@ -109,7 +109,7 @@ export const houseService = {
       .eq('id', houseId)
       .single();
 
-    if (houseError || !house) throw new Error('Casa não encontrada. Verifique o código.');
+    if (houseError || !house) throw new Error('Residência não encontrada. Verifique o código.');
 
     // Verifica se o user já faz parte desta casa
     const { data: existing } = await supabase
@@ -126,7 +126,7 @@ export const houseService = {
       .from('house_participants')
       .insert([{ house_id: houseId, user_id: userId, role: 'MEMBER' }]);
 
-    if (insertError) throw new Error(`Erro ao entrar na casa: ${insertError.message}`);
+    if (insertError) throw new Error(`Erro ao entrar na residência: ${insertError.message}`);
   },
 
 };
