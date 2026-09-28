@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, Platform, Modal, ActivityIndicator } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { supabase } from '../lib/supabase';
 import { shoppingService } from '../services/shoppingService';
 import { pantryService } from '../services/pantryService'; 
@@ -27,7 +28,12 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
 
-  // Sincronização via WebScocket
+  // Estados do Leitor de Código de Barras
+  const [permission, requestPermission] = useCameraPermissions();
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanned, setScanned] = useState(false);
+
+   // Sincronização via WebScocket
   useEffect(() => {
     if (!houseId) return;
 
@@ -36,13 +42,12 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       .on(
         'postgres_changes',
         {
-          event: '*', 
+          event: '*',
           schema: 'public',
           table: 'shopping_list',
           filter: `house_id=eq.${houseId}`
         },
         () => {
-          // Invalida a query e força a atualização instantânea na interface de todos os aparelhos
           queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
           queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
         }
@@ -109,6 +114,72 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     }
   });
 
+  // Consulta do Código de Barras
+  const handleBarcodeScanned = async ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+
+    try {
+      // Primeiro busca da Open Foods
+      let response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      let json = await response.json();
+
+      if (json.status === 1 && json.product) {
+        const productName = json.product.product_name || json.product.product_name_pt || 'Produto sem nome';
+        setNewItemName(productName);
+        setIsScannerOpen(false);
+        Alert.alert('Produto Encontrado!', `Identificado: ${productName}`);
+        return;
+      }
+
+      // Busca da Cosmos API
+      const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
+
+      if (COSMOS_TOKEN) {
+        const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Cosmos-Token': COSMOS_TOKEN,
+            'User-Agent': 'Cosmos-API-Request'
+          }
+        });
+
+        if (cosmosResponse.ok) {
+          const cosmosData = await cosmosResponse.json();
+          if (cosmosData && cosmosData.description) {
+            setNewItemName(cosmosData.description);
+            setIsScannerOpen(false);
+            Alert.alert('Produto Encontrado (Cosmos)!', `Identificado: ${cosmosData.description}`);
+            return;
+          }
+        }
+      }
+
+      // Caso não encontre em nenhuma das duas bases
+      Alert.alert('Não encontrado', 'Código lido, mas produto não localizado nas bases de dados. Insira o nome manualmente.', [
+        { text: 'OK', onPress: () => setIsScannerOpen(false) }
+      ]);
+
+    } catch (error) {
+      Alert.alert('Erro', 'Falha ao consultar as bases de dados de código de barras.');
+      setIsScannerOpen(false);
+    } finally {
+      setScanned(false);
+    }
+  };
+
+  const handleOpenScanner = async () => {
+    if (!permission?.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        return Alert.alert('Permissão necessária', 'É preciso permitir o acesso à câmara para ler códigos de barras.');
+      }
+    }
+    setScanned(false);
+    setIsScannerOpen(true);
+  };
+
   const handleSuggestionPress = (sug: any) => {
     Alert.alert(
       sug.product_name,
@@ -151,7 +222,13 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
         <View style={styles.inputWrapper}>
           <Feather name="shopping-bag" size={20} color="#94A3B8" style={styles.inputIcon} />
           <TextInput style={styles.inputName} placeholder="O que falta? (Ex: Azeite)" placeholderTextColor="#94A3B8" value={newItemName} onChangeText={setNewItemName} />
+          
+          {/* BOTÃO PARA LEITURA DE CÓDIGO DE BARRAS */}
+          <TouchableOpacity style={styles.barcodeBtn} onPress={handleOpenScanner}>
+            <Feather name="camera" size={20} color="#0F766E" />
+          </TouchableOpacity>
         </View>
+
         <View style={styles.row}>
           <TextInput style={styles.inputSmall} placeholder="Qtd" placeholderTextColor="#94A3B8" keyboardType="numeric" value={newItemQty} onChangeText={setNewItemQty} />
           <TextInput style={styles.inputSmall} placeholder="Unid" placeholderTextColor="#94A3B8" autoCapitalize="none" value={newItemUnit} onChangeText={setNewItemUnit} />
@@ -161,6 +238,43 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Modal da Câmera do Leitor */}
+      <Modal visible={isScannerOpen} animationType="slide">
+        <View style={styles.scannerContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+            barcodeScannerSettings={{
+              barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"],
+            }}
+          />
+          
+          {/* MIRA DO SCANNER */}
+          <View style={styles.scannerTargetContainer}>
+            <View style={styles.scannerTargetBox} />
+          </View>
+
+          <View style={styles.scannerOverlay}>
+            {scanned ? (
+              <View style={styles.loadingBoxScanner}>
+                <ActivityIndicator size="large" color="#CCFBF1" />
+                <Text style={styles.loadingTextScanner}>Buscando produto...</Text>
+              </View>
+            ) : (
+              <Text style={styles.scannerText}>Aponte para o código de barras</Text>
+            )}
+            
+            <TouchableOpacity 
+              style={[styles.closeScannerBtn, scanned && { opacity: 0.5 }]} 
+              onPress={() => setIsScannerOpen(false)}
+              disabled={scanned} // Impede de fechar enquanto busca na API
+            >
+              <Text style={styles.closeScannerText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {activeSuggestions && activeSuggestions.length > 0 && (
         <View style={styles.suggestionsContainer}>
@@ -266,14 +380,29 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
   
   addForm: { backgroundColor: '#FFFFFF', marginHorizontal: 20, padding: 20, borderRadius: 24, marginBottom: 20, shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
-  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 16, marginBottom: 16 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 16, marginBottom: 16, paddingRight: 8 },
   inputIcon: { paddingLeft: 16 },
   inputName: { flex: 1, padding: 16, fontSize: 16, color: '#0F172A', fontWeight: '500' },
+  barcodeBtn: { backgroundColor: '#CCFBF1', padding: 10, borderRadius: 12 },
+
   row: { flexDirection: 'row', gap: 8 },
   inputSmall: { flex: 1, backgroundColor: '#F1F5F9', padding: 14, borderRadius: 16, textAlign: 'center', fontSize: 15, color: '#0F172A', fontWeight: '500' },
   inputMedium: { flex: 1.2, backgroundColor: '#F1F5F9', padding: 14, borderRadius: 16, textAlign: 'center', fontSize: 15, color: '#0F172A', fontWeight: '500' },
   addButton: { backgroundColor: '#0F766E', width: 50, justifyContent: 'center', alignItems: 'center', borderRadius: 16 },
   
+  scannerContainer: { flex: 1, backgroundColor: '#000000' },
+  scannerTargetContainer: { ...StyleSheet.absoluteFill, justifyContent: 'center', alignItems: 'center', zIndex: 1 },
+  scannerTargetBox: { width: 260, height: 200, borderWidth: 3, borderColor: '#0F766E', borderRadius: 24, backgroundColor: 'transparent' },
+
+  scannerOverlay: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 60, zIndex: 2 },
+  scannerText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginBottom: 24, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, overflow: 'hidden' },
+  
+  loadingBoxScanner: { backgroundColor: 'rgba(15, 118, 110, 0.9)', paddingHorizontal: 32, paddingVertical: 20, borderRadius: 24, alignItems: 'center', marginBottom: 24 },
+  loadingTextScanner: { color: '#FFFFFF', marginTop: 12, fontSize: 16, fontWeight: '800' },
+  
+  closeScannerBtn: { backgroundColor: '#EF4444', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 20 },
+  closeScannerText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+
   suggestionsContainer: { paddingHorizontal: 20, marginBottom: 20 },
   suggestionsTitle: { fontSize: 14, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, marginLeft: 4 },
   suggestionsScroll: { flexDirection: 'row' },
