@@ -1,8 +1,8 @@
-// src/screens/ListScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
+import { supabase } from '../lib/supabase';
 import { shoppingService } from '../services/shoppingService';
 import { pantryService } from '../services/pantryService'; 
 
@@ -26,6 +26,33 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   const [newItemQty, setNewItemQty] = useState('1');
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
+
+  // Sincronização via WebScocket
+  useEffect(() => {
+    if (!houseId) return;
+
+    const channel = supabase
+      .channel(`public:shopping_list:house_id=eq.${houseId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', 
+          schema: 'public',
+          table: 'shopping_list',
+          filter: `house_id=eq.${houseId}`
+        },
+        () => {
+          // Invalida a query e força a atualização instantânea na interface de todos os aparelhos
+          queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
+          queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [houseId, queryClient]);
 
   const { data: items, isLoading } = useQuery({ queryKey: ['shoppingList', houseId], queryFn: () => shoppingService.getPendingItems(houseId) });
   const { data: suggestions } = useQuery({ queryKey: ['suggestions', houseId], queryFn: () => shoppingService.getSuggestions(houseId) });
@@ -193,7 +220,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
                     </View>
 
                     <View style={styles.editFieldGroup}>
-                      <Text style={styles.editLabel}>Duração (dias)</Text>
+                      <Text style={styles.editLabel}>Dias</Text>
                       <TextInput style={styles.editInput} keyboardType="numeric" value={editDuration} onChangeText={setEditDuration} />
                     </View>
 
@@ -274,9 +301,6 @@ const styles = StyleSheet.create({
   editActionsRow: { flexDirection: 'row', gap: 4, alignItems: 'center', marginBottom: 2 },
   saveEditBtn: { backgroundColor: '#0F766E', padding: 8, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
   cancelEditBtn: { backgroundColor: '#F1F5F9', padding: 8, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-
-  editRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  editInputSmall: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, width: 42, textAlign: 'center', fontWeight: '700', fontSize: 13 },
 
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inputPartial: { backgroundColor: '#F1F5F9', padding: 12, flex: 1, borderRadius: 16, textAlign: 'center', fontSize: 15, fontWeight: '600' },
