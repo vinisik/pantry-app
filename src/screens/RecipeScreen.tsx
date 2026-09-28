@@ -95,7 +95,7 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
-      Alert.alert('Sucesso!', 'Ingredientes em falta adicionados à lista de compras com quantidades padrão de mercado.');
+      Alert.alert('Sucesso!', 'Ingredientes em falta adicionados à lista de compras.');
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
