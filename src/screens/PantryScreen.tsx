@@ -20,7 +20,7 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
 
   const [scannedProductName, setScannedProductName] = useState('');
   const [scannedProductUnit, setScannedProductUnit] = useState('un');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
   const { data: items, isLoading, refetch } = useQuery({ queryKey: ['pantry', houseId], queryFn: () => pantryService.getEstimatedPantry(houseId) });
 
@@ -63,45 +63,54 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
     setScanned(true);
 
     try {
-      let response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
-      let json = await response.json();
+      let foundName = '';
+      let foundUnit = 'un';
+
+      // Tenta a API do Open Food Facts
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      const json = await response.json();
 
       if (json.status === 1 && json.product) {
-        const productName = json.product.product_name || json.product.product_name_pt || 'Produto sem nome';
-        const unit = json.product.quantity ? json.product.quantity.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'un' : 'un';
+        const prod = json.product;
+        foundName = prod.product_name_pt || prod.product_name || prod.generic_name_pt || prod.generic_name || '';
         
-        setIsScannerOpen(false);
-        saveScannedItemToPantry(productName, unit);
-        return;
+        if (prod.brands && foundName) {
+          foundName = `${foundName} (${prod.brands})`;
+        }
+
+        if (prod.quantity) {
+          foundUnit = prod.quantity.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'un';
+        }
       }
 
-      const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
+      // Fallback para a Bluesoft Cosmos API
+      if (!foundName) {
+        const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
 
-      if (COSMOS_TOKEN) {
-        const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Cosmos-Token': COSMOS_TOKEN,
-            'User-Agent': 'Cosmos-API-Request'
-          }
-        });
+        if (COSMOS_TOKEN) {
+          const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Cosmos-Token': COSMOS_TOKEN,
+              'User-Agent': 'Cosmos-API-Request'
+            }
+          });
 
-        if (cosmosResponse.ok) {
-          const cosmosData = await cosmosResponse.json();
-          if (cosmosData && cosmosData.description) {
-            setIsScannerOpen(false);
-            saveScannedItemToPantry(cosmosData.description, 'un');
-            return;
+          if (cosmosResponse.ok) {
+            const cosmosData = await cosmosResponse.json();
+            if (cosmosData && cosmosData.description) {
+              foundName = cosmosData.description;
+            }
           }
         }
       }
 
-      // Caso não encontre nas bases automáticas, abre modal para digitar o nome
+      // Abre o modal com o nome preenchido pronto para ser ajustado se necessário
       setIsScannerOpen(false);
-      setScannedProductName('');
-      setScannedProductUnit('un');
-      setIsAddModalOpen(true);
+      setScannedProductName(foundName || 'Novo Produto');
+      setScannedProductUnit(foundUnit || 'un');
+      setIsConfirmModalOpen(true);
 
     } catch (error) {
       Alert.alert('Erro', 'Falha ao consultar as bases de dados de produtos.');
@@ -119,6 +128,7 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
       status: 'AVAILABLE'
     }, {
       onSuccess: () => {
+        setIsConfirmModalOpen(false);
         Alert.alert('Guardado!', `"${name}" adicionado à despensa com sucesso.`);
       }
     });
@@ -134,7 +144,6 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
           <Text style={styles.subtitle}>O que tem em casa agora.</Text>
         </View>
         
-        {/* Botão do Scanner */}
         <TouchableOpacity style={styles.actionButton} onPress={handleOpenScanner} activeOpacity={0.8}>
           <Feather name="camera" size={16} color="#0F766E" />
           <Text style={styles.actionButtonText}>Guardar</Text>
@@ -221,13 +230,14 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
         </View>
       </Modal>
 
-      {/* MODAL DE FALLBACK CASO O PRODUTO NÃO ESTEJA NAS BASES */}
-      <Modal visible={isAddModalOpen} animationType="fade" transparent={true}>
+      {/* MODAL DE EDIÇÃO PRÉVIA ANTES DE GUARDAR NA DESPENSA */}
+      <Modal visible={isConfirmModalOpen} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Produto não catalogado</Text>
-            <Text style={styles.modalSubtitle}>Digite o nome do produto lido para salvá-lo na despensa:</Text>
+            <Text style={styles.modalTitle}>Guardar na Despensa</Text>
+            <Text style={styles.modalSubtitle}>Confirme ou edite o nome do produto antes de salvar:</Text>
             
+            <Text style={styles.labelInput}>Nome do Produto</Text>
             <TextInput 
               style={styles.modalInput} 
               placeholder="Ex: Achocolatado em Pó" 
@@ -235,15 +245,24 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
               value={scannedProductName}
               onChangeText={setScannedProductName}
             />
+
+            <Text style={styles.labelInput}>Unidade</Text>
+            <TextInput 
+              style={styles.modalInput} 
+              placeholder="Ex: un, kg, g, L" 
+              placeholderTextColor="#94A3B8"
+              autoCapitalize="none"
+              value={scannedProductUnit}
+              onChangeText={setScannedProductUnit}
+            />
             
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsAddModalOpen(false)}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsConfirmModalOpen(false)}>
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={() => {
                 if (scannedProductName.trim()) {
                   saveScannedItemToPantry(scannedProductName, scannedProductUnit);
-                  setIsAddModalOpen(false);
                 } else {
                   Alert.alert('Aviso', 'Insira um nome válido.');
                 }
@@ -341,7 +360,6 @@ const styles = StyleSheet.create({
   btnLow: { backgroundColor: '#FEF3C7' },
   btnOut: { backgroundColor: '#FEE2E2' },
 
-  // Estilos do Scanner EAN
   scannerContainer: { flex: 1, backgroundColor: '#000000' },
   scannerTargetContainer: { ...StyleSheet.absoluteFill, justifyContent: 'center', alignItems: 'center', zIndex: 1 },
   scannerTargetBox: { width: 260, height: 200, borderWidth: 3, borderColor: '#0F766E', borderRadius: 24, backgroundColor: 'transparent' },
@@ -352,13 +370,14 @@ const styles = StyleSheet.create({
   closeScannerBtn: { backgroundColor: '#EF4444', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 20 },
   closeScannerText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
 
-  // Estilos do Modal de Fallback
+  // Estilos do Modal de Edição Prévia
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFFFFF', width: '100%', maxWidth: 360, padding: 24, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 5 },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 8 },
-  modalSubtitle: { fontSize: 14, color: '#64748B', marginBottom: 16, lineHeight: 20 },
-  modalInput: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 16, fontSize: 16, color: '#0F172A', fontWeight: '600', marginBottom: 20 },
-  modalButtons: { flexDirection: 'row', gap: 12 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  modalSubtitle: { fontSize: 13, color: '#64748B', marginBottom: 16 },
+  labelInput: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4, textTransform: 'uppercase' },
+  modalInput: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 15, color: '#0F172A', fontWeight: '600', marginBottom: 14 },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
   modalCancelBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center' },
   modalCancelText: { color: '#64748B', fontWeight: '700', fontSize: 15 },
   modalSaveBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: '#0F766E', alignItems: 'center' },

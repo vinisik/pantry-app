@@ -1,3 +1,4 @@
+// src/screens/ListScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, Platform, Modal, ActivityIndicator } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,12 +29,17 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
   const [newItemUnit, setNewItemUnit] = useState('un');
   const [newItemDuration, setNewItemDuration] = useState('');
 
-  // Estados do Leitor de Código de Barras
+  // Estados do Leitor de Código de Barras e Modal de Confirmação
   const [permission, requestPermission] = useCameraPermissions();
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scanned, setScanned] = useState(false);
 
-   // Sincronização via WebScocket
+  const [scannedProductName, setScannedProductName] = useState('');
+  const [scannedQty, setScannedQty] = useState('1');
+  const [scannedUnit, setScannedUnit] = useState('un');
+  const [scannedDuration, setScannedDuration] = useState('');
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+
   useEffect(() => {
     if (!houseId) return;
 
@@ -67,6 +73,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
       shoppingService.addItem(houseId, userId, params.name, params.qty, params.unit, params.duration, false),
     onSuccess: () => {
       setNewItemName(''); setNewItemQty('1'); setNewItemUnit('un'); setNewItemDuration('');
+      setIsConfirmModalOpen(false);
       queryClient.invalidateQueries({ queryKey: ['shoppingList', houseId] });
       queryClient.invalidateQueries({ queryKey: ['suggestions', houseId] });
     },
@@ -114,52 +121,62 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
     }
   });
 
-  // Consulta do Código de Barras
   const handleBarcodeScanned = async ({ data }: { data: string }) => {
     if (scanned) return;
     setScanned(true);
 
     try {
-      // Primeiro busca da Open Foods
-      let response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
-      let json = await response.json();
+      let foundName = '';
+      let foundUnit = 'un';
+
+      // Tenta a API do Open Food Facts
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      const json = await response.json();
 
       if (json.status === 1 && json.product) {
-        const productName = json.product.product_name || json.product.product_name_pt || 'Produto sem nome';
-        setNewItemName(productName);
-        setIsScannerOpen(false);
-        Alert.alert('Produto Encontrado!', `Identificado: ${productName}`);
-        return;
+        const prod = json.product;
+        // Procura o nome em múltiplos campos possíveis para garantir que não vem vazio
+        foundName = prod.product_name_pt || prod.product_name || prod.generic_name_pt || prod.generic_name || '';
+        
+        if (prod.brands && foundName) {
+          foundName = `${foundName} (${prod.brands})`;
+        }
+        
+        if (prod.quantity) {
+          foundUnit = prod.quantity.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'un';
+        }
       }
 
-      // Busca da Cosmos API
-      const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
+      // Se não encontrou na Open Food Facts, tenta na Bluesoft Cosmos
+      if (!foundName) {
+        const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
 
-      if (COSMOS_TOKEN) {
-        const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Cosmos-Token': COSMOS_TOKEN,
-            'User-Agent': 'Cosmos-API-Request'
-          }
-        });
+        if (COSMOS_TOKEN) {
+          const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Cosmos-Token': COSMOS_TOKEN,
+              'User-Agent': 'Cosmos-API-Request'
+            }
+          });
 
-        if (cosmosResponse.ok) {
-          const cosmosData = await cosmosResponse.json();
-          if (cosmosData && cosmosData.description) {
-            setNewItemName(cosmosData.description);
-            setIsScannerOpen(false);
-            Alert.alert('Produto Encontrado (Cosmos)!', `Identificado: ${cosmosData.description}`);
-            return;
+          if (cosmosResponse.ok) {
+            const cosmosData = await cosmosResponse.json();
+            if (cosmosData && cosmosData.description) {
+              foundName = cosmosData.description;
+            }
           }
         }
       }
 
-      // Caso não encontre em nenhuma das duas bases
-      Alert.alert('Não encontrado', 'Código lido, mas produto não localizado nas bases de dados. Insira o nome manualmente.', [
-        { text: 'OK', onPress: () => setIsScannerOpen(false) }
-      ]);
+      // Prepara o estado do modal com o nome encontrado ou valor padrão para edição
+      setIsScannerOpen(false);
+      setScannedProductName(foundName || 'Novo Produto');
+      setScannedQty('1');
+      setScannedUnit(foundUnit || 'un');
+      setScannedDuration('');
+      setIsConfirmModalOpen(true);
 
     } catch (error) {
       Alert.alert('Erro', 'Falha ao consultar as bases de dados de código de barras.');
@@ -223,7 +240,6 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
           <Feather name="shopping-bag" size={20} color="#94A3B8" style={styles.inputIcon} />
           <TextInput style={styles.inputName} placeholder="O que falta? (Ex: Azeite)" placeholderTextColor="#94A3B8" value={newItemName} onChangeText={setNewItemName} />
           
-          {/* BOTÃO PARA LEITURA DE CÓDIGO DE BARRAS */}
           <TouchableOpacity style={styles.barcodeBtn} onPress={handleOpenScanner}>
             <Feather name="camera" size={20} color="#0F766E" />
           </TouchableOpacity>
@@ -250,7 +266,6 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
             }}
           />
           
-          {/* MIRA DO SCANNER */}
           <View style={styles.scannerTargetContainer}>
             <View style={styles.scannerTargetBox} />
           </View>
@@ -268,10 +283,82 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
             <TouchableOpacity 
               style={[styles.closeScannerBtn, scanned && { opacity: 0.5 }]} 
               onPress={() => setIsScannerOpen(false)}
-              disabled={scanned} // Impede de fechar enquanto busca na API
+              disabled={scanned}
             >
               <Text style={styles.closeScannerText}>Cancelar</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Edição antes de salvar um item do scanner */}
+      <Modal visible={isConfirmModalOpen} animationType="fade" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Confirmar Produto</Text>
+            <Text style={styles.modalSubtitle}>Ajuste as informações antes de adicionar à lista:</Text>
+            
+            <Text style={styles.labelInput}>Nome do Produto</Text>
+            <TextInput 
+              style={styles.modalInput} 
+              placeholder="Nome do produto" 
+              placeholderTextColor="#94A3B8"
+              value={scannedProductName}
+              onChangeText={setScannedProductName}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.labelInput}>Quantidade</Text>
+                <TextInput 
+                  style={styles.modalInputSmall} 
+                  placeholder="Qtd" 
+                  keyboardType="numeric"
+                  value={scannedQty}
+                  onChangeText={setScannedQty}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.labelInput}>Unidade</Text>
+                <TextInput 
+                  style={styles.modalInputSmall} 
+                  placeholder="Unidade" 
+                  autoCapitalize="none"
+                  value={scannedUnit}
+                  onChangeText={setScannedUnit}
+                />
+              </View>
+            </View>
+
+            <Text style={styles.labelInput}>Duração Estimada (Dias)</Text>
+            <TextInput 
+              style={styles.modalInput} 
+              placeholder="Ex: 15" 
+              placeholderTextColor="#94A3B8"
+              keyboardType="numeric"
+              value={scannedDuration}
+              onChangeText={setScannedDuration}
+            />
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsConfirmModalOpen(false)}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveBtn} onPress={() => {
+                if (scannedProductName.trim()) {
+                  addMutation.mutate({
+                    name: scannedProductName.trim(),
+                    qty: parseFloat(scannedQty) || 1,
+                    unit: scannedUnit.trim() || 'un',
+                    duration: scannedDuration ? parseInt(scannedDuration) : undefined
+                  });
+                } else {
+                  Alert.alert('Aviso', 'Insira um nome válido para o produto.');
+                }
+              }}>
+                <Text style={styles.modalSaveText}>Adicionar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -402,6 +489,20 @@ const styles = StyleSheet.create({
   
   closeScannerBtn: { backgroundColor: '#EF4444', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 20 },
   closeScannerText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+
+  // Estilos do Modal de Edição Prévia
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#FFFFFF', width: '100%', maxWidth: 360, padding: 24, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 5 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  modalSubtitle: { fontSize: 13, color: '#64748B', marginBottom: 16 },
+  labelInput: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4, textTransform: 'uppercase' },
+  modalInput: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 15, color: '#0F172A', fontWeight: '600', marginBottom: 14 },
+  modalInputSmall: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 15, color: '#0F172A', fontWeight: '600', textAlign: 'center' },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  modalCancelBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center' },
+  modalCancelText: { color: '#64748B', fontWeight: '700', fontSize: 15 },
+  modalSaveBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: '#0F766E', alignItems: 'center' },
+  modalSaveText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 
   suggestionsContainer: { paddingHorizontal: 20, marginBottom: 20 },
   suggestionsTitle: { fontSize: 14, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, marginLeft: 4 },
