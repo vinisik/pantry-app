@@ -30,7 +30,6 @@ export const shoppingService = {
     if (error) throw new Error(`Erro ao adicionar item à lista: ${error.message}`);
   },
 
-  // Atualizar quantidade e unidade de um item pendente
   async updateItem(itemId: string, quantityRequested: number, unit: string, duration?: number) {
     const { error } = await supabase
       .from('shopping_list')
@@ -45,39 +44,58 @@ export const shoppingService = {
   },
 
   async confirmPurchase(params: { itemId: string, houseId: string, userId: string, productName: string, quantityRequested: number, quantityBoughtNow: number, unit: string }) {
-    const { data: current } = await supabase
+    // 1. Busca a VERDADE ABSOLUTA na base de dados (Ignora o houseId falho do frontend)
+    const { data: current, error: fetchError } = await supabase
       .from('shopping_list')
-      .select('quantity_bought, quantity_requested')
+      .select('house_id, quantity_bought, quantity_requested, product_name, unit')
       .eq('id', params.itemId)
       .single();
 
-    if (!current) return;
+    if (fetchError || !current) throw new Error('Item não encontrado na base de dados.');
+
+    // GARANTIA: O house_id que vem da própria tabela de compras (nunca será nulo)
+    const safeHouseId = current.house_id;
+    const safeProductName = current.product_name;
+    const safeUnit = current.unit || 'un';
 
     const newBought = current.quantity_bought + params.quantityBoughtNow;
 
     if (newBought >= current.quantity_requested) {
-      await supabase.from('shopping_list').delete().eq('id', params.itemId);
+      const { error: deleteError } = await supabase.from('shopping_list').delete().eq('id', params.itemId);
+      if (deleteError) throw new Error(`Erro ao limpar lista de compras: ${deleteError.message}`);
     } else {
-      await supabase.from('shopping_list').update({ quantity_bought: newBought }).eq('id', params.itemId);
+      const { error: updateError } = await supabase.from('shopping_list').update({ quantity_bought: newBought }).eq('id', params.itemId);
+      if (updateError) throw new Error(`Erro ao atualizar lista de compras: ${updateError.message}`);
     }
 
+    // 2. Procura na Despensa usando o ID seguro
     const { data: existingPantryItem } = await supabase
       .from('pantry_items')
       .select('id')
-      .eq('house_id', params.houseId)
-      .ilike('product_name', params.productName.trim())
+      .eq('house_id', safeHouseId)
+      .ilike('product_name', safeProductName.trim())
       .maybeSingle();
 
-    const pantryIdToUpdate = existingPantryItem ? existingPantryItem.id : 'new';
+    if (existingPantryItem) {
+      const { error: pantryUpdateError } = await supabase
+        .from('pantry_items')
+        .update({ status: 'AVAILABLE' })
+        .eq('id', existingPantryItem.id);
+        
+      if (pantryUpdateError) throw new Error(`Erro ao atualizar despensa: ${pantryUpdateError.message}`);
+    } else {
+      // 3. Insere na Despensa usando o ID seguro
+      const { error: pantryInsertError } = await supabase
+        .from('pantry_items')
+        .insert({
+          house_id: safeHouseId,
+          product_name: safeProductName.trim(),
+          unit: safeUnit.trim(),
+          status: 'AVAILABLE'
+        });
 
-    await pantryService.updateItemStatus(
-      pantryIdToUpdate, 
-      params.houseId, 
-      params.userId, 
-      'AVAILABLE', 
-      params.productName, 
-      params.unit
-    );
+      if (pantryInsertError) throw new Error(`Erro ao enviar para despensa: ${pantryInsertError.message}`);
+    }
   },
 
   async deleteItem(itemId: string) {
