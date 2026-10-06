@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
   },
 
   title: { 
-    fontSize: 32, 
+    fontSize: 36, 
     fontWeight: '900', 
     color: '#0F172A', 
     letterSpacing: -1, 

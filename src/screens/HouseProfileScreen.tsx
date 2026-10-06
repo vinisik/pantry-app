@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, ScrollView,
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
 import { houseService } from '../services/houseService';
+import { supabase } from '../lib/supabase';
 
 interface ResidenceProfileScreenProps { houseId: string; }
 
@@ -24,6 +25,26 @@ export default function ResidenceProfileScreen({ houseId }: ResidenceProfileScre
     mutationFn: (prefId: string) => houseService.removePreference(prefId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['housePreferences', houseId] }),
   });
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sair da Conta',
+      'Tem certeza que deseja sair do aplicativo?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sair',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.auth.signOut();
+            if (error) {
+              Alert.alert('Erro', 'Não foi possível desconectar: ' + error.message);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   if (isLoading) return <View style={styles.centered}><Text style={styles.loadingText}>Carregando perfil...</Text></View>;
   if (isError) return <View style={styles.centered}><Text style={styles.errorText}>Erro ao carregar dados.</Text></View>;
@@ -107,6 +128,11 @@ export default function ResidenceProfileScreen({ houseId }: ResidenceProfileScre
           </View>
         </View>
       ))}
+
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <Feather name="log-out" size={20} color="#EF4444" />
+        <Text style={styles.logoutText}>Sair da Conta</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -165,5 +191,8 @@ const styles = StyleSheet.create({
   codeRow: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 16, alignItems: 'center', paddingLeft: 16, overflow: 'hidden' },
   codeText: { flex: 1, color: '#0F766E', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
   copyButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0F766E', paddingVertical: 16, paddingHorizontal: 20 },
-  copyButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 }
+  copyButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+
+  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FEE2E2', paddingVertical: 16, borderRadius: 16, marginTop: 32, gap: 8 },
+  logoutText: { color: '#EF4444', fontSize: 16, fontWeight: '700' }
 });

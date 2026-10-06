@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, View, TextInput, TouchableOpacity, Text, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, StyleSheet, View, TextInput, TouchableOpacity, Text, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
@@ -28,7 +28,11 @@ export default function AuthScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <View style={styles.headerContainer}>
         <View style={styles.iconCircle}>
-          <Feather name="shopping-bag" size={40} color="#0F766E" />
+          <Image 
+            source={require('../../assets/logo.png')} 
+            style={styles.logo}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.title}>My Pantry</Text>
         <Text style={styles.subtitle}>Gestão inteligente e IA culinária</Text>
@@ -82,7 +86,7 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#F8FAFC' },
   headerContainer: { alignItems: 'center', marginBottom: 40 },
-  iconCircle: { width: 88, height: 88, borderRadius: 28, backgroundColor: '#CCFBF1', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  iconCircle: { width: 88, height: 88, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
   title: { fontSize: 36, fontWeight: '900', color: '#0F172A', textAlign: 'center', marginBottom: 8, letterSpacing: -1.5 },
   subtitle: { fontSize: 16, color: '#64748B', textAlign: 'center', fontWeight: '500' },
   formCard: { backgroundColor: '#FFFFFF', padding: 28, borderRadius: 32, shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 6 },
@@ -95,4 +99,5 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
   secondaryButton: { backgroundColor: '#F1F5F9', padding: 18, borderRadius: 16, alignItems: 'center', marginTop: 12 },
   secondaryButtonText: { color: '#334155', fontWeight: '800', fontSize: 16 },
+  logo: { width: 150, height: 150, borderRadius: 24,  marginBottom: 24, alignSelf: 'center' },
 });

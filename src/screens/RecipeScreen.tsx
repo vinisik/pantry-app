@@ -255,7 +255,7 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
               
               <View style={[styles.statusBadge, isReady ? styles.badgeReady : styles.badgeMissing]}>
                 <Text style={[styles.statusText, isReady ? styles.textReady : styles.textMissing]}>
-                  {isReady ? 'Pode fazer agora' : `Faltam ${item.missingIngredients.length} ingredientes`}
+                  {isReady ? 'Pronto para preparar' : `Faltam ${item.missingIngredients.length} ingredientes`}
                 </Text>
               </View>
             </TouchableOpacity>
