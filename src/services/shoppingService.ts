@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabase';
-import { pantryService } from './pantryService';
 
 export const shoppingService = {
   async getPendingItems(houseId: string) {
@@ -31,13 +30,18 @@ export const shoppingService = {
   },
 
   async updateItem(itemId: string, quantityRequested: number, unit: string, duration?: number) {
+    const updateData: any = { 
+      quantity_requested: quantityRequested, 
+      unit: unit.trim() || 'un' 
+    };
+    
+    if (duration !== undefined) {
+      updateData.expected_duration_days = duration;
+    }
+
     const { error } = await supabase
       .from('shopping_list')
-      .update({ 
-        quantity_requested: quantityRequested, 
-        unit: unit.trim() || 'un',
-        expected_duration_days: duration || null
-      })
+      .update(updateData)
       .eq('id', itemId);
 
     if (error) throw new Error(`Erro ao atualizar item: ${error.message}`);
@@ -55,7 +59,6 @@ export const shoppingService = {
     const safeHouseId = current.house_id;
     const safeProductName = current.product_name;
     const safeUnit = current.unit || 'un';
-
     const newBought = current.quantity_bought + params.quantityBoughtNow;
 
     if (newBought >= current.quantity_requested) {
@@ -76,7 +79,11 @@ export const shoppingService = {
     if (existingPantryItem) {
       const { error: pantryUpdateError } = await supabase
         .from('pantry_items')
-        .update({ status: 'AVAILABLE' })
+        .update({ 
+          status: 'AVAILABLE', 
+          quantity: params.quantityBoughtNow,
+          unit: safeUnit
+        })
         .eq('id', existingPantryItem.id);
         
       if (pantryUpdateError) throw new Error(`Erro ao atualizar despensa: ${pantryUpdateError.message}`);
@@ -86,8 +93,9 @@ export const shoppingService = {
         .insert({
           house_id: safeHouseId,
           product_name: safeProductName.trim(),
-          unit: safeUnit.trim(),
-          status: 'AVAILABLE'
+          unit: safeUnit,
+          status: 'AVAILABLE',
+          quantity: params.quantityBoughtNow
         });
 
       if (pantryInsertError) throw new Error(`Erro ao enviar para despensa: ${pantryInsertError.message}`);

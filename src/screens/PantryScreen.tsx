@@ -66,27 +66,22 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
       let foundName = '';
       let foundUnit = 'un';
 
-      // Tenta a API do Open Food Facts
       const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
       const json = await response.json();
 
       if (json.status === 1 && json.product) {
         const prod = json.product;
         foundName = prod.product_name_pt || prod.product_name || prod.generic_name_pt || prod.generic_name || '';
-        
         if (prod.brands && foundName) {
           foundName = `${foundName} (${prod.brands})`;
         }
-
         if (prod.quantity) {
           foundUnit = prod.quantity.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'un';
         }
       }
 
-      // Fallback para a Bluesoft Cosmos API
       if (!foundName) {
         const COSMOS_TOKEN = process.env.EXPO_PUBLIC_COSMOS_TOKEN;
-
         if (COSMOS_TOKEN) {
           const cosmosResponse = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${data}.json`, {
             method: 'GET',
@@ -96,7 +91,6 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
               'User-Agent': 'Cosmos-API-Request'
             }
           });
-
           if (cosmosResponse.ok) {
             const cosmosData = await cosmosResponse.json();
             if (cosmosData && cosmosData.description) {
@@ -106,7 +100,6 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
         }
       }
 
-      // Abre o modal com o nome preenchido pronto para ser ajustado se necessário
       setIsScannerOpen(false);
       setScannedProductName(foundName || 'Novo Produto');
       setScannedProductUnit(foundUnit || 'un');
@@ -178,7 +171,18 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
                         {isLow ? 'Acabando' : 'Boa quantidade'}
                       </Text>
                     </View>
-                    <Text style={styles.unitText}>{item.unit}</Text>
+                    
+                    {/* NOVO SELO DE QUANTIDADE AQUI */}
+                    {item.quantity ? (
+                      <View style={styles.qtyBadge}>
+                        <Text style={styles.qtyBadgeText}>{item.quantity} {item.unit}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.qtyBadge}>
+                        <Text style={styles.qtyBadgeText}>- {item.unit}</Text>
+                      </View>
+                    )}
+
                   </View>
                 </View>
                 
@@ -203,7 +207,6 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
         }}
       />
 
-      {/* Modal do Scanner de Código de Barras */}
       <Modal visible={isScannerOpen} animationType="slide">
         <View style={styles.scannerContainer}>
           <CameraView
@@ -230,7 +233,6 @@ export default function PantryScreen({ houseId, session }: PantryScreenProps) {
         </View>
       </Modal>
 
-      {/* MODAL DE EDIÇÃO PRÉVIA ANTES DE GUARDAR NA DESPENSA */}
       <Modal visible={isConfirmModalOpen} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -283,53 +285,13 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
   loadingText: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   
-  headerRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 20, 
-    marginBottom: 20,
-    gap: 12 
-  },
-  
-  headerTextContainer: {
-    flex: 1,
-  },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 20, gap: 12 },
+  headerTextContainer: { flex: 1 },
+  title: { fontSize: 36, fontWeight: '900', color: '#0F172A', letterSpacing: -1, marginBottom: 2 },
+  subtitle: { fontSize: 14, color: '#64748B', fontWeight: '500' },
 
-  title: { 
-    fontSize: 36, 
-    fontWeight: '900', 
-    color: '#0F172A', 
-    letterSpacing: -1, 
-    marginBottom: 2 
-  },
-  
-  subtitle: { 
-    fontSize: 14, 
-    color: '#64748B', 
-    fontWeight: '500' 
-  },
-
-  actionButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#CCFBF1', 
-    paddingHorizontal: 12, 
-    paddingVertical: 10, 
-    borderRadius: 14, 
-    gap: 6,
-    shadowColor: '#0F766E',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2
-  },
-  
-  actionButtonText: { 
-    color: '#0F766E', 
-    fontWeight: '800', 
-    fontSize: 13 
-  },
+  actionButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#CCFBF1', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, gap: 6, shadowColor: '#0F766E', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 },
+  actionButtonText: { color: '#0F766E', fontWeight: '800', fontSize: 13 },
   
   listContainer: { paddingHorizontal: 20, paddingBottom: 40 },
   emptyState: { alignItems: 'center', marginTop: 80 },
@@ -352,7 +314,9 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
   textOk: { color: '#047857' },
   textLow: { color: '#B45309' },
-  unitText: { color: '#94A3B8', fontWeight: '700', fontSize: 14 },
+
+  qtyBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  qtyBadgeText: { color: '#475569', fontWeight: '700', fontSize: 12 },
   
   actions: { flexDirection: 'row', gap: 10 },
   btn: { width: 44, height: 44, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
@@ -370,7 +334,6 @@ const styles = StyleSheet.create({
   closeScannerBtn: { backgroundColor: '#EF4444', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 20 },
   closeScannerText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
 
-  // Estilos do Modal de Edição Prévia
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFFFFF', width: '100%', maxWidth: 360, padding: 24, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 5 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
