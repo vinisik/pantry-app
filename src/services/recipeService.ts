@@ -14,7 +14,7 @@ export const recipeService = {
     return data;
   },
 
-  // Registra que a casa preparou esta receita 
+  // Regista que a casa preparou esta receita 
   async registerPrep(houseId: string, userId: string, recipeName: string) {
     const { error } = await supabase.from('house_events').insert({
       house_id: houseId,
@@ -23,7 +23,7 @@ export const recipeService = {
       payload: { recipe_name: recipeName }
     });
 
-    if (error) throw new Error(`Erro ao registrar preparo: ${error.message}`);
+    if (error) throw new Error(`Erro ao registar preparo: ${error.message}`);
   },
 
   // Exclui uma receita do catálogo

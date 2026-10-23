@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, ScrollView, Alert, StyleSheet, Platform } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, ScrollView, Alert, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
 import { recipeService } from '../services/recipeService';
 import { pantryService } from '../services/pantryService';
 import { aiRecipeService } from '../services/aiRecipeService';
 import { shoppingService } from '../services/shoppingService';
+import { houseService } from '../services/houseService';
 
 interface RecipesScreenProps {
   houseId: string;
@@ -23,6 +24,12 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
 
   const { data: recipes, isLoading: loadingRecipes } = useQuery({ queryKey: ['recipes'], queryFn: () => recipeService.getCatalog() });
   const { data: pantry, isLoading: loadingPantry } = useQuery({ queryKey: ['pantry', houseId], queryFn: () => pantryService.getEstimatedPantry(houseId) });
+  
+  // Nova Query para ir buscar as regras da residência
+  const { data: preferences, isLoading: loadingPrefs } = useQuery({ queryKey: ['housePreferences', houseId], queryFn: () => houseService.getHousePreferences(houseId) });
+
+  const activeRestrictions = preferences?.filter(p => p.type === 'RESTRICTION') || [];
+  const activePreferences = preferences?.filter(p => p.type === 'PREFERENCE') || [];
 
   const prepMutation = useMutation({
     mutationFn: (recipeName: string) => recipeService.registerPrep(houseId, userId, recipeName),
@@ -30,8 +37,28 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   });
 
   const generateAiRecipeMutation = useMutation({
-    mutationFn: () => aiRecipeService.generateAndSaveRecipe(houseId, pantry || [], aiPrompt),
-    onSuccess: () => { setAiPrompt(''); queryClient.invalidateQueries({ queryKey: ['recipes'] }); Alert.alert('Sucesso!', 'A IA criou uma receita!'); }
+    mutationFn: () => {
+      // INJEÇÃO DE REGRAS NO PROMPT
+      let finalPrompt = aiPrompt || 'Crie uma refeição criativa com o que tenho disponível.';
+      
+      const restrictionsText = activeRestrictions.map(r => r.value).join(', ');
+      const preferencesText = activePreferences.map(p => p.value).join(', ');
+
+      if (restrictionsText || preferencesText) {
+        finalPrompt += `\n\nATENÇÃO ÀS REGRAS OBRIGATÓRIAS DA CASA:\n`;
+        if (restrictionsText) finalPrompt += `- PROIBIDO USAR (Restrições): ${restrictionsText}\n`;
+        if (preferencesText) finalPrompt += `- PRIORIZAR (Preferências): ${preferencesText}\n`;
+      }
+
+      // Envia o prompt enriquecido para o seu serviço de IA
+      return aiRecipeService.generateAndSaveRecipe(houseId, pantry || [], finalPrompt);
+    },
+    onSuccess: () => { 
+      setAiPrompt(''); 
+      queryClient.invalidateQueries({ queryKey: ['recipes'] }); 
+      Alert.alert('Sucesso!', 'A IA criou uma receita respeitando as regras da casa!'); 
+    },
+    onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
   const deleteRecipeMutation = useMutation({
@@ -61,31 +88,18 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
         let quantity = recipeIng?.quantity || 1;
         let unit = recipeIng?.unit || 'un';
 
-        // Lógica inteligente de embalagens comerciais padrão de mercado
-        if (rawName.includes('sal')) {
-          quantity = 1;
-          unit = 'kg';
-        } else if (rawName.includes('açúcar') || rawName.includes('acucar')) {
-          quantity = 1;
-          unit = 'kg';
+        if (rawName.includes('sal') || rawName.includes('açúcar') || rawName.includes('acucar') || rawName.includes('farinha')) {
+          quantity = 1; unit = 'kg';
         } else if (rawName.includes('arroz')) {
-          quantity = 5;
-          unit = 'kg';
+          quantity = 5; unit = 'kg';
         } else if (rawName.includes('óleo') || rawName.includes('oleo') || rawName.includes('azeite')) {
-          quantity = 1;
-          unit = 'un';
-        } else if (rawName.includes('farinha')) {
-          quantity = 1;
-          unit = 'kg';
+          quantity = 1; unit = 'un';
         } else if (rawName.includes('leite')) {
-          quantity = 1;
-          unit = 'L';
+          quantity = 1; unit = 'L';
         } else if (rawName.includes('manteiga') || rawName.includes('margarina')) {
-          quantity = 1;
-          unit = 'un'; 
+          quantity = 1; unit = 'un'; 
         } else if (rawName.includes('ovo') || rawName.includes('ovos')) {
-          quantity = 6;
-          unit = 'un';
+          quantity = 6; unit = 'un';
           quantity = recipeIng?.quantity && recipeIng.quantity < 1 ? 1 : (recipeIng?.quantity || 1);
           unit = recipeIng?.unit || 'un';
         }
@@ -129,7 +143,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     return { ...recipe, missingIngredients };
   })?.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length);
 
-  // Vista de Revisão Pós-Preparo
   if (reviewingRecipe) {
     return (
       <View style={styles.container}>
@@ -156,7 +169,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     );
   }
 
-  // Detalhes da Receita
   if (selectedRecipe) {
     return (
       <View style={styles.container}>
@@ -192,7 +204,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
             })}
           </View>
 
-          {/* Botão de Adicionar Faltas à Lista */}
           {selectedRecipe.missingIngredients && selectedRecipe.missingIngredients.length > 0 && (
             <TouchableOpacity 
               style={styles.btnAddMissing} 
@@ -214,14 +225,13 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
 
         <View style={styles.bottomBar}>
           <TouchableOpacity style={styles.btnCookPrimary} onPress={() => prepMutation.mutate(selectedRecipe.title)}>
-            <Text style={styles.btnCookTextPrimary}>Cozinhar isso!</Text>
+            <Text style={styles.btnCookTextPrimary}>Cozinhar isto!</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // Lista de Receitas Principal
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -230,12 +240,37 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
       </View>
 
       <View style={styles.aiCard}>
+        <Text style={styles.aiCardTitle}>Receita Inteligente</Text>
+        
+        {/* Renderização visual das regras */}
+        <View style={styles.rulesContainer}>
+          {loadingPrefs && <ActivityIndicator size="small" color="#4F46E5" />}
+          
+          {activeRestrictions.map(r => (
+            <View key={r.id} style={[styles.tag, styles.tagRestriction]}>
+              <Feather name="slash" size={12} color="#991B1B" />
+              <Text style={styles.tagRestrictionText}>{r.value}</Text>
+            </View>
+          ))}
+          
+          {activePreferences.map(p => (
+            <View key={p.id} style={[styles.tag, styles.tagPreference]}>
+              <Feather name="star" size={12} color="#B45309" />
+              <Text style={styles.tagPreferenceText}>{p.value}</Text>
+            </View>
+          ))}
+
+          {(!activeRestrictions.length && !activePreferences.length && !loadingPrefs) && (
+            <Text style={styles.noRulesText}>Sem regras alimentares ativas.</Text>
+          )}
+        </View>
+
         <View style={styles.aiInputWrapper}>
           <Feather name="cpu" size={20} color="#6366F1" />
           <TextInput style={styles.aiInput} placeholder="Ex: Almoço com frango" placeholderTextColor="#94A3B8" value={aiPrompt} onChangeText={setAiPrompt} />
         </View>
         <TouchableOpacity style={styles.aiButton} onPress={() => generateAiRecipeMutation.mutate()} disabled={generateAiRecipeMutation.isPending}>
-          <Text style={styles.aiButtonText}>{generateAiRecipeMutation.isPending ? 'A gerar...' : 'Criar prato com IA'}</Text>
+          <Text style={styles.aiButtonText}>{generateAiRecipeMutation.isPending ? 'A gerar magia...' : 'Criar prato com IA'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -276,6 +311,16 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
   
   aiCard: { backgroundColor: '#EEF2FF', marginHorizontal: 20, padding: 20, borderRadius: 24, marginBottom: 20 },
+  aiCardTitle: { fontSize: 14, fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', marginBottom: 12 },
+  
+  rulesContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  tag: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 4 },
+  tagRestriction: { backgroundColor: '#FEE2E2' },
+  tagRestrictionText: { color: '#991B1B', fontWeight: '700', fontSize: 12 },
+  tagPreference: { backgroundColor: '#FEF3C7' },
+  tagPreferenceText: { color: '#B45309', fontWeight: '700', fontSize: 12 },
+  noRulesText: { color: '#94A3B8', fontSize: 13, fontStyle: 'italic' },
+
   aiInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, marginBottom: 16 },
   aiInput: { flex: 1, paddingVertical: 16, paddingLeft: 12, fontSize: 16, color: '#0F172A', fontWeight: '500' },
   aiButton: { backgroundColor: '#4F46E5', padding: 16, borderRadius: 16, alignItems: 'center' },
