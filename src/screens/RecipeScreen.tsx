@@ -21,8 +21,9 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   const [exhaustedItems, setExhaustedItems] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSearchTerm, setActiveSearchTerm] = useState('');
+  const [loadingRecommendation, setLoadingRecommendation] = useState(false);
 
-  // Se houver busca ativa, pesquisa no catálogo global
+  // Se houver pesquisa ativa, consulta o catálogo. Caso contrário, traz apenas as salvas da casa.
   const { data: recipes, isLoading: loadingRecipes } = useQuery({ 
     queryKey: ['recipes', houseId, activeSearchTerm], 
     queryFn: () => activeSearchTerm.trim() !== '' 
@@ -31,12 +32,73 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   });
 
   const { data: pantry, isLoading: loadingPantry } = useQuery({ queryKey: ['pantry', houseId], queryFn: () => pantryService.getEstimatedPantry(houseId) });
-  const { data: preferences, isLoading: loadingPrefs } = useQuery({ queryKey: ['housePreferences', houseId], queryFn: () => houseService.getHousePreferences(houseId) });
+  const { data: preferences } = useQuery({ queryKey: ['housePreferences', houseId], queryFn: () => houseService.getHousePreferences(houseId) });
 
-  const activeRestrictions = preferences?.filter(p => p.type === 'RESTRICTION') || [];
-  const activePreferences = preferences?.filter(p => p.type === 'PREFERENCE') || [];
+  // Função utilitária para calcular ingredientes faltantes em tempo de execução caso venha do recomendador
+  const computeMissingIngredients = (recipe: any) => {
+    if (!recipe?.recipe_ingredients) return [];
+    const missing: string[] = [];
+    const availableProducts = new Set((pantry || []).map(p => p.product_name.toLowerCase().trim()));
 
-  // Mutation para guardar receita do catálogo na casa
+    recipe.recipe_ingredients.forEach((ing: any) => {
+      const ingName = ing.product_name.toLowerCase().trim();
+      if (!availableProducts.has(ingName)) {
+        missing.push(ing.product_name);
+      }
+    });
+
+    return missing;
+  };
+
+  // Recomendação por Despensa
+  const handlePantryRecommendation = async () => {
+    try {
+      setLoadingRecommendation(true);
+      const topMatch = await recipeService.getPantryRecommendation(pantry || []);
+      
+      if (topMatch) {
+        Alert.alert(
+          '💡 Recomendação pela Despensa',
+          `Sugerimos: "${topMatch.title}" (${topMatch.matchPercentage}% dos ingredientes disponíveis).`,
+          [
+            { text: 'Ver Receita', onPress: () => setSelectedRecipe(topMatch) },
+            { text: 'Fechar', style: 'cancel' }
+          ]
+        );
+      } else {
+        Alert.alert('Aviso', 'Nenhuma receita encontrada no catálogo.');
+      }
+    } catch (err: any) {
+      Alert.alert('Erro', err.message);
+    } finally {
+      setLoadingRecommendation(false);
+    }
+  };
+
+  // Recomendação Aleatória (Qualquer)
+  const handleRandomRecommendation = async () => {
+    try {
+      setLoadingRecommendation(true);
+      const randomRecipe = await recipeService.getRandomRecommendation();
+      
+      if (randomRecipe) {
+        Alert.alert(
+          '🎲 Sugestão do Chef',
+          `Que tal preparar: "${randomRecipe.title}"?`,
+          [
+            { text: 'Ver Receita', onPress: () => setSelectedRecipe(randomRecipe) },
+            { text: 'Outra Sugestão', onPress: handleRandomRecommendation },
+            { text: 'Cancelar', style: 'cancel' }
+          ]
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Erro', err.message);
+    } finally {
+      setLoadingRecommendation(false);
+    }
+  };
+
   const saveRecipeMutation = useMutation({
     mutationFn: (recipeId: string) => recipeService.saveRecipeToHouse(houseId, recipeId),
     onSuccess: () => {
@@ -46,7 +108,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     onError: (error: any) => Alert.alert('Aviso', error.message.includes('unique') ? 'Esta receita já está salva.' : error.message)
   });
 
-  // Mutation para remover receita das salvas da casa
   const removeSavedRecipeMutation = useMutation({
     mutationFn: (recipeId: string) => recipeService.removeRecipeFromHouse(houseId, recipeId),
     onSuccess: () => {
@@ -61,6 +122,22 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     mutationFn: (recipeName: string) => recipeService.registerPrep(houseId, userId, recipeName),
     onSuccess: () => { setReviewingRecipe(selectedRecipe); setSelectedRecipe(null); setExhaustedItems([]); }
   });
+
+  const deleteRecipeMutation = useMutation({
+    mutationFn: (recipeId: string) => recipeService.deleteRecipe(recipeId),
+    onSuccess: (_, recipeId) => {
+      queryClient.setQueryData(['recipes', houseId, activeSearchTerm], (old: any) => old ? old.filter((r: any) => r.id !== recipeId) : []);
+      setSelectedRecipe(null);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['recipes'] }),
+  });
+
+  const confirmDelete = (recipeId: string, recipeTitle: string) => {
+    Alert.alert('Excluir do Catálogo', `Deseja apagar definitivamente "${recipeTitle}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => deleteRecipeMutation.mutate(recipeId) }
+    ]);
+  };
 
   const addMissingToShoppingListMutation = useMutation({
     mutationFn: async (missingList: string[]) => {
@@ -117,16 +194,14 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   if (loadingPantry) return <View style={styles.centered}><Text style={styles.loadingText}>A ler os cadernos...</Text></View>;
 
   const processedRecipes = recipes?.map((recipe: any) => {
-    const missingIngredients: string[] = [];
-    if (recipe?.recipe_ingredients) {
-      recipe.recipe_ingredients.forEach((ing: any) => {
-        if (!pantry?.some(p => p.product_name.toLowerCase() === ing.product_name.toLowerCase())) missingIngredients.push(ing.product_name);
-      });
-    }
+    const missingIngredients = computeMissingIngredients(recipe);
     return { ...recipe, missingIngredients };
   })?.sort((a, b) => a.missingIngredients.length - b.missingIngredients.length);
 
+  // TELA DE PÓS-PREPARO (REVIEW)
   if (reviewingRecipe) {
+    const missingList = reviewingRecipe.missingIngredients || computeMissingIngredients(reviewingRecipe);
+
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -134,11 +209,11 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           <Text style={styles.subtitle}>Algum destes ingredientes acabou durante o preparo?</Text>
         </View>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 20 }}>
-          {reviewingRecipe.recipe_ingredients.map((ing: any) => {
-            if (reviewingRecipe.missingIngredients.includes(ing.product_name)) return null;
+          {reviewingRecipe.recipe_ingredients?.map((ing: any) => {
+            if (missingList.includes(ing.product_name)) return null;
             const isSelected = exhaustedItems.includes(ing.product_name);
             return (
-              <TouchableOpacity key={ing.id} style={[styles.reviewItem, isSelected && styles.reviewItemSelected]} onPress={() => toggleExhausted(ing.product_name)}>
+              <TouchableOpacity key={ing.id || ing.product_name} style={[styles.reviewItem, isSelected && styles.reviewItemSelected]} onPress={() => toggleExhausted(ing.product_name)}>
                 <Text style={[styles.reviewItemText, isSelected && styles.reviewItemTextSelected]}>{ing.product_name}</Text>
                 {isSelected && <Feather name="check-circle" size={24} color="#EF4444" />}
               </TouchableOpacity>
@@ -152,7 +227,10 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     );
   }
 
+  // TELA DE DETALHES DA RECEITA
   if (selectedRecipe) {
+    const missingList = selectedRecipe.missingIngredients || computeMissingIngredients(selectedRecipe);
+
     return (
       <View style={styles.container}>
         <View style={styles.detailNav}>
@@ -162,6 +240,9 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <TouchableOpacity onPress={() => saveRecipeMutation.mutate(selectedRecipe.id)} style={styles.saveBtn}>
               <Feather name="bookmark" size={20} color="#4F46E5" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => confirmDelete(selectedRecipe.id, selectedRecipe.title)} style={styles.deleteBtn}>
+              <Feather name="trash-2" size={20} color="#EF4444" />
             </TouchableOpacity>
           </View>
         </View>
@@ -177,7 +258,7 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           <Text style={styles.sectionTitle}>Ingredientes</Text>
           <View style={styles.ingredientsBox}>
             {selectedRecipe.recipe_ingredients?.map((ing: any) => {
-              const isMissing = selectedRecipe.missingIngredients.includes(ing.product_name);
+              const isMissing = missingList.includes(ing.product_name);
               return (
                 <View key={ing.id || ing.product_name} style={styles.ingredientRow}>
                   <View style={[styles.bullet, isMissing && styles.bulletMissing]} />
@@ -189,10 +270,10 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
             })}
           </View>
 
-          {selectedRecipe.missingIngredients && selectedRecipe.missingIngredients.length > 0 && (
+          {missingList.length > 0 && (
             <TouchableOpacity 
               style={styles.btnAddMissing} 
-              onPress={() => addMissingToShoppingListMutation.mutate(selectedRecipe.missingIngredients)}
+              onPress={() => addMissingToShoppingListMutation.mutate(missingList)}
               disabled={addMissingToShoppingListMutation.isPending}
             >
               <Feather name="shopping-cart" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
@@ -207,7 +288,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
             <Text style={styles.instructions}>{selectedRecipe.instructions}</Text>
           </View>
 
-          {/* Botão de remover da lista da casa */}
           {activeSearchTerm === '' && (
             <TouchableOpacity 
               style={styles.btnRemoveSaved} 
@@ -228,6 +308,7 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     );
   }
 
+  // TELA PRINCIPAL DE LISTAGEM
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -237,14 +318,37 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
         </Text>
       </View>
 
-      <View style={styles.aiCard}>
-        <Text style={styles.aiCardTitle}>Procurar no Catálogo</Text>
-        
-        <View style={styles.aiInputWrapper}>
+      {/* PAINEL DE RECOMENDAÇÕES */}
+      <View style={styles.recommendCard}>
+        <Text style={styles.recommendCardTitle}>Recomendador de Pratos</Text>
+        <View style={styles.recommendRow}>
+          <TouchableOpacity 
+            style={styles.btnRecommendPantry} 
+            onPress={handlePantryRecommendation}
+            disabled={loadingRecommendation}
+          >
+            <Feather name="box" size={18} color="#FFFFFF" />
+            <Text style={styles.btnRecommendText}>Usar a Despensa</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.btnRecommendRandom} 
+            onPress={handleRandomRecommendation}
+            disabled={loadingRecommendation}
+          >
+            <Feather name="shuffle" size={18} color="#4F46E5" />
+            <Text style={styles.btnRecommendRandomText}>Qualquer Uma</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* BARRA DE PESQUISA */}
+      <View style={styles.searchCard}>
+        <View style={styles.searchInputWrapper}>
           <Feather name="search" size={20} color="#6366F1" />
           <TextInput 
-            style={styles.aiInput} 
-            placeholder="Ex: Frango, massa, bolo..." 
+            style={styles.searchInput} 
+            placeholder="Pesquisar catálogo (ex: Frango, massa)..." 
             placeholderTextColor="#94A3B8" 
             value={searchQuery} 
             onChangeText={(text) => {
@@ -259,14 +363,14 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           )}
         </View>
         <TouchableOpacity 
-          style={styles.aiButton} 
+          style={styles.searchButton} 
           onPress={() => setActiveSearchTerm(searchQuery)}
         >
-          <Text style={styles.aiButtonText}>Pesquisar no Catálogo</Text>
+          <Text style={styles.searchButtonText}>Pesquisar no Catálogo</Text>
         </TouchableOpacity>
       </View>
 
-      {loadingRecipes ? (
+      {loadingRecipes || loadingRecommendation ? (
         <View style={{ marginTop: 40 }}><ActivityIndicator size="large" color="#4F46E5" /></View>
       ) : (
         <FlatList
@@ -275,7 +379,7 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           contentContainerStyle={styles.listContainer}
           ListEmptyComponent={
             <Text style={styles.emptyText}>
-              {activeSearchTerm !== '' ? 'Nenhuma receita encontrada no catálogo.' : 'Nenhuma receita salva ainda. Pesquise no catálogo para adicionar!'}
+              {activeSearchTerm !== '' ? 'Nenhuma receita encontrada no catálogo.' : 'Nenhuma receita salva ainda. Use a pesquisa ou as recomendações acima!'}
             </Text>
           }
           renderItem={({ item }) => {
@@ -306,20 +410,26 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
   loadingText: { color: '#64748B', fontSize: 16, fontWeight: '500' },
   
-  header: { paddingHorizontal: 24, marginBottom: 20 },
+  header: { paddingHorizontal: 24, marginBottom: 16 },
   title: { fontSize: 36, fontWeight: '900', color: '#0F172A', letterSpacing: -1.5, marginBottom: 4 },
   subtitle: { fontSize: 16, color: '#64748B', fontWeight: '500' },
   
-  aiCard: { backgroundColor: '#EEF2FF', marginHorizontal: 20, padding: 20, borderRadius: 24, marginBottom: 20 },
-  aiCardTitle: { fontSize: 14, fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', marginBottom: 12 },
-  
-  aiInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, marginBottom: 16 },
-  aiInput: { flex: 1, paddingVertical: 16, paddingLeft: 12, fontSize: 16, color: '#0F172A', fontWeight: '500' },
-  aiButton: { backgroundColor: '#4F46E5', padding: 16, borderRadius: 16, alignItems: 'center' },
-  aiButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  recommendCard: { backgroundColor: '#EEF2FF', marginHorizontal: 20, padding: 18, borderRadius: 24, marginBottom: 12 },
+  recommendCardTitle: { fontSize: 13, fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', marginBottom: 12 },
+  recommendRow: { flexDirection: 'row', gap: 10 },
+  btnRecommendPantry: { flex: 1, backgroundColor: '#4F46E5', padding: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  btnRecommendText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  btnRecommendRandom: { flex: 1, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#C7D2FE' },
+  btnRecommendRandomText: { color: '#4F46E5', fontWeight: '800', fontSize: 13 },
+
+  searchCard: { backgroundColor: '#F1F5F9', marginHorizontal: 20, padding: 16, borderRadius: 24, marginBottom: 20 },
+  searchInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, marginBottom: 12 },
+  searchInput: { flex: 1, paddingVertical: 14, paddingLeft: 10, fontSize: 15, color: '#0F172A', fontWeight: '500' },
+  searchButton: { backgroundColor: '#0F172A', padding: 14, borderRadius: 16, alignItems: 'center' },
+  searchButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
 
   listContainer: { paddingHorizontal: 20, paddingBottom: 40 },
-  emptyText: { textAlign: 'center', color: '#94A3B8', fontSize: 16, marginTop: 40 },
+  emptyText: { textAlign: 'center', color: '#94A3B8', fontSize: 15, marginTop: 30, paddingHorizontal: 20, lineHeight: 22 },
   
   recipeCard: { backgroundColor: '#FFFFFF', padding: 24, marginBottom: 16, borderRadius: 24, shadowColor: '#94A3B8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
   recipeCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
