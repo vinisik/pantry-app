@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
 import { recipeService } from '../services/recipeService';
 import { pantryService } from '../services/pantryService';
-import { aiRecipeService } from '../services/aiRecipeService';
 import { shoppingService } from '../services/shoppingService';
 import { houseService } from '../services/houseService';
 
@@ -20,62 +19,48 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
   const [reviewingRecipe, setReviewingRecipe] = useState<any>(null);
   const [exhaustedItems, setExhaustedItems] = useState<string[]>([]);
-  const [aiPrompt, setAiPrompt] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearchTerm, setActiveSearchTerm] = useState('');
 
-  const { data: recipes, isLoading: loadingRecipes } = useQuery({ queryKey: ['recipes'], queryFn: () => recipeService.getCatalog() });
+  // Se houver busca ativa, pesquisa no catálogo global
+  const { data: recipes, isLoading: loadingRecipes } = useQuery({ 
+    queryKey: ['recipes', houseId, activeSearchTerm], 
+    queryFn: () => activeSearchTerm.trim() !== '' 
+      ? recipeService.searchCatalog(activeSearchTerm) 
+      : recipeService.getSavedRecipes(houseId) 
+  });
+
   const { data: pantry, isLoading: loadingPantry } = useQuery({ queryKey: ['pantry', houseId], queryFn: () => pantryService.getEstimatedPantry(houseId) });
-  
-  // Nova Query para ir buscar as regras da residência
   const { data: preferences, isLoading: loadingPrefs } = useQuery({ queryKey: ['housePreferences', houseId], queryFn: () => houseService.getHousePreferences(houseId) });
 
   const activeRestrictions = preferences?.filter(p => p.type === 'RESTRICTION') || [];
   const activePreferences = preferences?.filter(p => p.type === 'PREFERENCE') || [];
 
-  const prepMutation = useMutation({
-    mutationFn: (recipeName: string) => recipeService.registerPrep(houseId, userId, recipeName),
-    onSuccess: () => { setReviewingRecipe(selectedRecipe); setSelectedRecipe(null); setExhaustedItems([]); }
+  // Mutation para guardar receita do catálogo na casa
+  const saveRecipeMutation = useMutation({
+    mutationFn: (recipeId: string) => recipeService.saveRecipeToHouse(houseId, recipeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recipes', houseId] });
+      Alert.alert('Sucesso!', 'Receita salva na lista da casa.');
+    },
+    onError: (error: any) => Alert.alert('Aviso', error.message.includes('unique') ? 'Esta receita já está salva.' : error.message)
   });
 
-  const generateAiRecipeMutation = useMutation({
-    mutationFn: () => {
-      // INJEÇÃO DE REGRAS NO PROMPT
-      let finalPrompt = aiPrompt || 'Crie uma refeição criativa com o que tenho disponível.';
-      
-      const restrictionsText = activeRestrictions.map(r => r.value).join(', ');
-      const preferencesText = activePreferences.map(p => p.value).join(', ');
-
-      if (restrictionsText || preferencesText) {
-        finalPrompt += `\n\nATENÇÃO ÀS REGRAS OBRIGATÓRIAS DA CASA:\n`;
-        if (restrictionsText) finalPrompt += `- PROIBIDO USAR (Restrições): ${restrictionsText}\n`;
-        if (preferencesText) finalPrompt += `- PRIORIZAR (Preferências): ${preferencesText}\n`;
-      }
-
-      // Envia o prompt enriquecido para o seu serviço de IA
-      return aiRecipeService.generateAndSaveRecipe(houseId, pantry || [], finalPrompt);
-    },
-    onSuccess: () => { 
-      setAiPrompt(''); 
-      queryClient.invalidateQueries({ queryKey: ['recipes'] }); 
-      Alert.alert('Sucesso!', 'A IA criou uma receita respeitando as regras da casa!'); 
+  // Mutation para remover receita das salvas da casa
+  const removeSavedRecipeMutation = useMutation({
+    mutationFn: (recipeId: string) => recipeService.removeRecipeFromHouse(houseId, recipeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recipes', houseId] });
+      setSelectedRecipe(null);
+      Alert.alert('Sucesso', 'Receita removida das salvas.');
     },
     onError: (error: any) => Alert.alert('Erro', error.message)
   });
 
-  const deleteRecipeMutation = useMutation({
-    mutationFn: (recipeId: string) => recipeService.deleteRecipe(recipeId),
-    onSuccess: (_, recipeId) => {
-      queryClient.setQueryData(['recipes'], (old: any) => old ? old.filter((r: any) => r.id !== recipeId) : []);
-      setSelectedRecipe(null);
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['recipes'] }),
+  const prepMutation = useMutation({
+    mutationFn: (recipeName: string) => recipeService.registerPrep(houseId, userId, recipeName),
+    onSuccess: () => { setReviewingRecipe(selectedRecipe); setSelectedRecipe(null); setExhaustedItems([]); }
   });
-
-  const confirmDelete = (recipeId: string, recipeTitle: string) => {
-    Alert.alert('Excluir Receita', `Deseja apagar "${recipeTitle}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Excluir', style: 'destructive', onPress: () => deleteRecipeMutation.mutate(recipeId) }
-    ]);
-  };
 
   const addMissingToShoppingListMutation = useMutation({
     mutationFn: async (missingList: string[]) => {
@@ -100,8 +85,6 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           quantity = 1; unit = 'un'; 
         } else if (rawName.includes('ovo') || rawName.includes('ovos')) {
           quantity = 6; unit = 'un';
-          quantity = recipeIng?.quantity && recipeIng.quantity < 1 ? 1 : (recipeIng?.quantity || 1);
-          unit = recipeIng?.unit || 'un';
         }
 
         await shoppingService.addItem(houseId, userId, itemName, quantity, unit, undefined, false);
@@ -131,11 +114,11 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     }
   });
 
-  if (loadingRecipes || loadingPantry) return <View style={styles.centered}><Text style={styles.loadingText}>A ler os cadernos...</Text></View>;
+  if (loadingPantry) return <View style={styles.centered}><Text style={styles.loadingText}>A ler os cadernos...</Text></View>;
 
   const processedRecipes = recipes?.map((recipe: any) => {
     const missingIngredients: string[] = [];
-    if (recipe.recipe_ingredients) {
+    if (recipe?.recipe_ingredients) {
       recipe.recipe_ingredients.forEach((ing: any) => {
         if (!pantry?.some(p => p.product_name.toLowerCase() === ing.product_name.toLowerCase())) missingIngredients.push(ing.product_name);
       });
@@ -176,9 +159,11 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           <TouchableOpacity onPress={() => setSelectedRecipe(null)} style={styles.backBtn}>
             <Feather name="arrow-left" size={24} color="#0F172A" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => confirmDelete(selectedRecipe.id, selectedRecipe.title)} style={styles.deleteBtn}>
-            <Feather name="trash-2" size={20} color="#EF4444" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <TouchableOpacity onPress={() => saveRecipeMutation.mutate(selectedRecipe.id)} style={styles.saveBtn}>
+              <Feather name="bookmark" size={20} color="#4F46E5" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40, paddingHorizontal: 24 }}>
@@ -191,10 +176,10 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
 
           <Text style={styles.sectionTitle}>Ingredientes</Text>
           <View style={styles.ingredientsBox}>
-            {selectedRecipe.recipe_ingredients.map((ing: any) => {
+            {selectedRecipe.recipe_ingredients?.map((ing: any) => {
               const isMissing = selectedRecipe.missingIngredients.includes(ing.product_name);
               return (
-                <View key={ing.id} style={styles.ingredientRow}>
+                <View key={ing.id || ing.product_name} style={styles.ingredientRow}>
                   <View style={[styles.bullet, isMissing && styles.bulletMissing]} />
                   <Text style={[styles.ingredientText, isMissing && styles.ingredientMissing]}>
                     {ing.quantity} {ing.unit} {ing.product_name}
@@ -221,6 +206,17 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
           <View style={styles.instructionsBox}>
             <Text style={styles.instructions}>{selectedRecipe.instructions}</Text>
           </View>
+
+          {/* Botão de remover da lista da casa */}
+          {activeSearchTerm === '' && (
+            <TouchableOpacity 
+              style={styles.btnRemoveSaved} 
+              onPress={() => removeSavedRecipeMutation.mutate(selectedRecipe.id)}
+            >
+              <Feather name="minus-circle" size={18} color="#EF4444" style={{ marginRight: 8 }} />
+              <Text style={styles.btnRemoveSavedText}>Remover das receitas salvas</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
 
         <View style={styles.bottomBar}>
@@ -236,67 +232,71 @@ export default function RecipesScreen({ houseId, session }: RecipesScreenProps) 
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Receitas</Text>
-        <Text style={styles.subtitle}>O que fazer com o que tem em casa</Text>
+        <Text style={styles.subtitle}>
+          {activeSearchTerm !== '' ? 'Resultados da pesquisa no catálogo' : 'Suas receitas salvas e recomendadas'}
+        </Text>
       </View>
 
       <View style={styles.aiCard}>
-        <Text style={styles.aiCardTitle}>Receita Inteligente</Text>
+        <Text style={styles.aiCardTitle}>Procurar no Catálogo</Text>
         
-        {/* Renderização visual das regras */}
-        <View style={styles.rulesContainer}>
-          {loadingPrefs && <ActivityIndicator size="small" color="#4F46E5" />}
-          
-          {activeRestrictions.map(r => (
-            <View key={r.id} style={[styles.tag, styles.tagRestriction]}>
-              <Feather name="slash" size={12} color="#991B1B" />
-              <Text style={styles.tagRestrictionText}>{r.value}</Text>
-            </View>
-          ))}
-          
-          {activePreferences.map(p => (
-            <View key={p.id} style={[styles.tag, styles.tagPreference]}>
-              <Feather name="star" size={12} color="#B45309" />
-              <Text style={styles.tagPreferenceText}>{p.value}</Text>
-            </View>
-          ))}
-
-          {(!activeRestrictions.length && !activePreferences.length && !loadingPrefs) && (
-            <Text style={styles.noRulesText}>Sem regras alimentares ativas.</Text>
+        <View style={styles.aiInputWrapper}>
+          <Feather name="search" size={20} color="#6366F1" />
+          <TextInput 
+            style={styles.aiInput} 
+            placeholder="Ex: Frango, massa, bolo..." 
+            placeholderTextColor="#94A3B8" 
+            value={searchQuery} 
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              if (text === '') setActiveSearchTerm('');
+            }} 
+          />
+          {searchQuery !== '' && (
+            <TouchableOpacity onPress={() => { setSearchQuery(''); setActiveSearchTerm(''); }}>
+              <Feather name="x" size={20} color="#94A3B8" />
+            </TouchableOpacity>
           )}
         </View>
-
-        <View style={styles.aiInputWrapper}>
-          <Feather name="cpu" size={20} color="#6366F1" />
-          <TextInput style={styles.aiInput} placeholder="Ex: Almoço com frango" placeholderTextColor="#94A3B8" value={aiPrompt} onChangeText={setAiPrompt} />
-        </View>
-        <TouchableOpacity style={styles.aiButton} onPress={() => generateAiRecipeMutation.mutate()} disabled={generateAiRecipeMutation.isPending}>
-          <Text style={styles.aiButtonText}>{generateAiRecipeMutation.isPending ? 'A gerar magia...' : 'Criar prato com IA'}</Text>
+        <TouchableOpacity 
+          style={styles.aiButton} 
+          onPress={() => setActiveSearchTerm(searchQuery)}
+        >
+          <Text style={styles.aiButtonText}>Pesquisar no Catálogo</Text>
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={processedRecipes}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={<Text style={styles.emptyText}>Nenhuma receita no catálogo.</Text>}
-        renderItem={({ item }) => {
-          const isReady = item.missingIngredients.length === 0;
-          return (
-            <TouchableOpacity style={styles.recipeCard} onPress={() => setSelectedRecipe(item)} activeOpacity={0.8}>
-              <View style={styles.recipeCardHeader}>
-                <Text style={styles.recipeTitle}>{item.title}</Text>
-                <View style={styles.timeBadge}><Text style={styles.timeText}>{item.prep_time_minutes}m</Text></View>
-              </View>
-              
-              <View style={[styles.statusBadge, isReady ? styles.badgeReady : styles.badgeMissing]}>
-                <Text style={[styles.statusText, isReady ? styles.textReady : styles.textMissing]}>
-                  {isReady ? 'Pronto para preparar' : `Faltam ${item.missingIngredients.length} ingredientes`}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-      />
+      {loadingRecipes ? (
+        <View style={{ marginTop: 40 }}><ActivityIndicator size="large" color="#4F46E5" /></View>
+      ) : (
+        <FlatList
+          data={processedRecipes}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>
+              {activeSearchTerm !== '' ? 'Nenhuma receita encontrada no catálogo.' : 'Nenhuma receita salva ainda. Pesquise no catálogo para adicionar!'}
+            </Text>
+          }
+          renderItem={({ item }) => {
+            const isReady = item.missingIngredients.length === 0;
+            return (
+              <TouchableOpacity style={styles.recipeCard} onPress={() => setSelectedRecipe(item)} activeOpacity={0.8}>
+                <View style={styles.recipeCardHeader}>
+                  <Text style={styles.recipeTitle}>{item.title}</Text>
+                  <View style={styles.timeBadge}><Text style={styles.timeText}>{item.prep_time_minutes}m</Text></View>
+                </View>
+                
+                <View style={[styles.statusBadge, isReady ? styles.badgeReady : styles.badgeMissing]}>
+                  <Text style={[styles.statusText, isReady ? styles.textReady : styles.textMissing]}>
+                    {isReady ? 'Pronto para preparar' : `Faltam ${item.missingIngredients.length} ingredientes`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -313,14 +313,6 @@ const styles = StyleSheet.create({
   aiCard: { backgroundColor: '#EEF2FF', marginHorizontal: 20, padding: 20, borderRadius: 24, marginBottom: 20 },
   aiCardTitle: { fontSize: 14, fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', marginBottom: 12 },
   
-  rulesContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  tag: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 4 },
-  tagRestriction: { backgroundColor: '#FEE2E2' },
-  tagRestrictionText: { color: '#991B1B', fontWeight: '700', fontSize: 12 },
-  tagPreference: { backgroundColor: '#FEF3C7' },
-  tagPreferenceText: { color: '#B45309', fontWeight: '700', fontSize: 12 },
-  noRulesText: { color: '#94A3B8', fontSize: 13, fontStyle: 'italic' },
-
   aiInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, marginBottom: 16 },
   aiInput: { flex: 1, paddingVertical: 16, paddingLeft: 12, fontSize: 16, color: '#0F172A', fontWeight: '500' },
   aiButton: { backgroundColor: '#4F46E5', padding: 16, borderRadius: 16, alignItems: 'center' },
@@ -343,6 +335,7 @@ const styles = StyleSheet.create({
 
   detailNav: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 16 },
   backBtn: { width: 44, height: 44, backgroundColor: '#FFFFFF', borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 },
+  saveBtn: { width: 44, height: 44, backgroundColor: '#EEF2FF', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   deleteBtn: { width: 44, height: 44, backgroundColor: '#FEE2E2', borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   
   detailTitle: { fontSize: 32, fontWeight: '900', color: '#0F172A', letterSpacing: -1, marginBottom: 20 },
@@ -361,6 +354,9 @@ const styles = StyleSheet.create({
   btnAddMissing: { flexDirection: 'row', backgroundColor: '#D97706', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24, shadowColor: '#94A3B8', shadowOpacity: 0.1, shadowRadius: 8 },
   btnAddMissingText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   
+  btnRemoveSaved: { flexDirection: 'row', backgroundColor: '#FEF2F2', padding: 16, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 24, borderWidth: 1, borderColor: '#FCA5A5' },
+  btnRemoveSavedText: { color: '#EF4444', fontSize: 16, fontWeight: '800' },
+
   instructionsBox: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 24, marginBottom: 40, shadowColor: '#94A3B8', shadowOpacity: 0.05, shadowRadius: 10 },
   instructions: { fontSize: 16, color: '#334155', lineHeight: 28, fontWeight: '500' },
   

@@ -42,3 +42,11 @@ yarn-error.*
 
 .env
 eas.json
+
+# Supabase
+supabase/.temp/
+supabase/.branch
+
+# Variáveis de Ambiente (Segurança)
+.env.local
+

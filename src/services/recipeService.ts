@@ -1,20 +1,68 @@
 import { supabase } from '../lib/supabase';
 
 export const recipeService = {
-  async getCatalog() {
+  // Procura as receitas salvas/recomendadas da casa
+  async getSavedRecipes(houseId: string) {
     const { data, error } = await supabase
-      .from('recipes')
+      .from('house_recipes')
       .select(`
-        *,
-        recipe_ingredients (*)
+        recipe_id,
+        recipes (
+          *,
+          recipe_ingredients (*)
+        )
       `)
-      .order('title', { ascending: true });
+      .eq('house_id', houseId);
 
-    if (error) throw new Error(`Erro ao buscar receitas: ${error.message}`);
-    return data;
+    if (error) throw new Error(`Erro ao buscar receitas salvas: ${error.message}`);
+    
+    // Mapeia o resultado para retornar a estrutura da receita diretamente
+    return data ? data.map(item => item.recipes) : [];
   },
 
-  // Regista que a casa preparou esta receita 
+  // Procura no catálogo completo por receitas que correspondam ao termo de pesquisa
+  async searchCatalog(searchTerm: string) {
+    if (!searchTerm || searchTerm.trim() === '') {
+      const { data, error } = await supabase
+        .from('recipes')
+        .select(`*, recipe_ingredients (*)`)
+        .order('title', { ascending: true });
+
+      if (error) throw new Error(`Erro ao buscar receitas: ${error.message}`);
+      return data;
+    }
+
+    const query = searchTerm.trim().toLowerCase();
+    const { data, error } = await supabase
+      .from('recipes')
+      .select(`*, recipe_ingredients (*)`)
+      .ilike('title', `%${query}%`)
+      .order('title', { ascending: true });
+
+    if (error) throw new Error(`Erro ao pesquisar receitas: ${error.message}`);
+    return data || [];
+  },
+
+  // Salva uma receita do catálogo na lista da casa
+  async saveRecipeToHouse(houseId: string, recipeId: string) {
+    const { error } = await supabase
+      .from('house_recipes')
+      .insert({ house_id: houseId, recipe_id: recipeId });
+
+    if (error) throw new Error(`Erro ao salvar receita: ${error.message}`);
+  },
+
+  // Remove uma receita da lista da casa
+  async removeRecipeFromHouse(houseId: string, recipeId: string) {
+    const { error } = await supabase
+      .from('house_recipes')
+      .delete()
+      .eq('house_id', houseId)
+      .eq('recipe_id', recipeId);
+
+    if (error) throw new Error(`Erro ao remover receita: ${error.message}`);
+  },
+
   async registerPrep(houseId: string, userId: string, recipeName: string) {
     const { error } = await supabase.from('house_events').insert({
       house_id: houseId,
@@ -24,28 +72,5 @@ export const recipeService = {
     });
 
     if (error) throw new Error(`Erro ao registar preparo: ${error.message}`);
-  },
-
-  // Exclui uma receita do catálogo
-  async deleteRecipe(recipeId: string) {
-    const { error: ingError } = await supabase
-      .from('recipe_ingredients')
-      .delete()
-      .eq('recipe_id', recipeId);
-
-    if (ingError) {
-      console.error('Erro ao apagar ingredientes:', ingError);
-      throw new Error(`Erro ao apagar ingredientes: ${ingError.message}`);
-    }
-
-    const { error: recipeError } = await supabase
-      .from('recipes')
-      .delete()
-      .eq('id', recipeId);
-
-    if (recipeError) {
-      console.error('Erro ao apagar receita:', recipeError);
-      throw new Error(`Erro ao apagar receita: ${recipeError.message}`);
-    }
-  },
+  }
 };
