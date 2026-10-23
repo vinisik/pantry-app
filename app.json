@@ -27,6 +27,12 @@
         "projectId": "180c3dae-7d06-47a6-a030-4578dc0b2665"
       }
     },
-    "owner": "vinisik"
+    "owner": "vinisik",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/180c3dae-7d06-47a6-a030-4578dc0b2665"
+    }
   }
 }

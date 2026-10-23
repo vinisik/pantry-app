@@ -226,7 +226,7 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
               </View>
             </View>
             <Text style={styles.labelInput}>Duração Estimada (Dias)</Text>
-            <TextInput style={styles.modalInput} placeholder="Ex: 15" placeholderTextColor="#94A3B8" keyboardType="numeric" value={scannedDuration} onChangeText={setScannedDuration} />
+            <TextInput style={styles.modalInput} placeholder="Ex: 15 dias" placeholderTextColor="#94A3B8" keyboardType="numeric" value={scannedDuration} onChangeText={setScannedDuration} />
             <View style={styles.modalButtons}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setIsConfirmModalOpen(false)}>
                 <Text style={styles.modalCancelText}>Cancelar</Text>
@@ -281,20 +281,28 @@ export default function ListScreen({ session, houseId, onBack }: ListScreenProps
               
               <View style={styles.actions}>
                 <View style={styles.inputsRow}>
-                  <TextInput 
-                    style={styles.inputAction} 
-                    defaultValue={String(item.quantity_requested - item.quantity_bought)}
-                    keyboardType="numeric" 
-                    onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} 
-                  />
-                  <TextInput 
-                    style={styles.inputAction} 
-                    defaultValue={item.expected_duration_days ? String(item.expected_duration_days) : ''}
-                    placeholder="Dias (duração)" 
-                    placeholderTextColor="#94A3B8" 
-                    keyboardType="numeric" 
-                    onChangeText={(val) => setDurationAmounts(prev => ({ ...prev, [item.id]: val }))} 
-                  />
+                  <View style={styles.actionInputGroup}>
+                    <Text style={styles.actionInputLabel}>Qtd.</Text>
+                    <TextInput 
+                      style={styles.inputAction} 
+                      defaultValue={String(item.quantity_requested - item.quantity_bought)}
+                      placeholder="Ex: 2kg"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric" 
+                      onChangeText={(val) => setPartialAmounts(prev => ({ ...prev, [item.id]: val }))} 
+                    />
+                  </View>
+                  <View style={styles.actionInputGroup}>
+                    <Text style={styles.actionInputLabel}>Duração</Text>
+                    <TextInput 
+                      style={styles.inputAction} 
+                      defaultValue={item.expected_duration_days ? String(item.expected_duration_days) : ''}
+                      placeholder="Ex: 15 dias"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric" 
+                      onChangeText={(val) => setDurationAmounts(prev => ({ ...prev, [item.id]: val }))} 
+                    />
+                  </View>
                 </View>
                 <TouchableOpacity style={styles.btnPartial} onPress={() => handleBuy(item, true)}>
                   <Feather name="pie-chart" size={20} color="#F59E0B" />
@@ -344,7 +352,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
   modalSubtitle: { fontSize: 13, color: '#64748B', marginBottom: 16 },
   labelInput: { fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4, textTransform: 'uppercase' },
-  modalInput: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 15, color: '#0F172A', fontWeight: '600', marginBottom: 14 },
+  modalInput: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 10, color: '#0F172A', fontWeight: '600', marginBottom: 14 },
   modalInputSmall: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 14, fontSize: 15, color: '#0F172A', fontWeight: '600', textAlign: 'center' },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
   modalCancelBtn: { flex: 1, padding: 14, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center' },
@@ -367,6 +375,8 @@ const styles = StyleSheet.create({
   qtyText: { color: '#0F766E', fontWeight: '800', fontSize: 14 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inputsRow: { flex: 1, flexDirection: 'row', gap: 6 },
+  actionInputGroup: { flex: 1 },
+  actionInputLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', marginBottom: 4, textAlign: 'center' },
   inputAction: { backgroundColor: '#F1F5F9', paddingVertical: 12, paddingHorizontal: 4, flex: 1, borderRadius: 14, textAlign: 'center', fontSize: 14, fontWeight: '600', color: '#0F172A' },
   btnPartial: { backgroundColor: '#FEF3C7', width: 44, height: 44, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   btnComplete: { backgroundColor: '#CCFBF1', width: 44, height: 44, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
